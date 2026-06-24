@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LSP demo dashboard</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1115;
+        --panel: #171a21;
+        --border: #2a3140;
+        --text: #e8eaed;
+        --muted: #9aa0a6;
+        --accent: #6c9cff;
+        --danger: #ff6b6b;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.45;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.25rem 1rem 3rem;
+      }
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+      }
+      h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 1.5rem 0 0.75rem;
+        color: var(--muted);
+      }
+      .banner {
+        border: 1px solid var(--danger);
+        background: rgba(255, 107, 107, 0.08);
+        color: var(--text);
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin: 0 0 1rem;
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      @media (min-width: 840px) {
+        .grid.cols-2 {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1rem 1.1rem;
+      }
+      section h3 {
+        margin: 0 0 0.75rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.35rem 1rem;
+        font-size: 0.88rem;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+        word-break: break-all;
+        font-family: ui-monospace, monospace;
+        font-size: 0.82rem;
+      }
+      pre,
+      textarea {
+        font-family: ui-monospace, monospace;
+        font-size: 0.78rem;
+        background: #0b0d11;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.65rem 0.75rem;
+        overflow: auto;
+        margin: 0;
+        width: 100%;
+        color: var(--text);
+      }
+      textarea {
+        min-height: 6rem;
+        resize: vertical;
+      }
+      label {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 0.65rem;
+        margin-bottom: 0.25rem;
+      }
+      input[type="text"],
+      input[type="password"] {
+        width: 100%;
+        padding: 0.45rem 0.55rem;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: #0b0d11;
+        color: var(--text);
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+      }
+      button {
+        margin-top: 0.65rem;
+        padding: 0.45rem 0.9rem;
+        border-radius: 6px;
+        border: 1px solid var(--accent);
+        background: rgba(108, 156, 255, 0.15);
+        color: var(--accent);
+        font-weight: 500;
+        cursor: pointer;
+      }
+      button:hover {
+        background: rgba(108, 156, 255, 0.28);
+      }
+      button.secondary {
+        border-color: var(--border);
+        background: transparent;
+        color: var(--muted);
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+      }
+      .err {
+        color: var(--danger);
+        font-size: 0.85rem;
+        margin-top: 0.5rem;
+      }
+      .ok {
+        color: #7dffb3;
+        font-size: 0.85rem;
+        margin-top: 0.5rem;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Liquid staking demo dashboard</h1>
+      <p class="hint">
+        Serve this folder over HTTP (for example <code>python3 -m http.server 8080</code> inside
+        <code>demo/</code>) so browser requests to Flow REST and Flow EVM RPC work reliably. Load
+        <code>config.sample.js</code> then optional <code>config.local.js</code> to override addresses.
+      </p>
+      <!-- <div class="banner">
+        <strong>Demo only.</strong> Pasting a private key in a web page is unsafe: keys stay in memory
+        and can be captured by XSS or extensions. Use a funded throwaway EOA on Flow EVM testnet only.
+        Cadence keeper transactions cannot be signed from this page; the UI generates a
+        <code>flow transactions send …</code> command for your protocol signer.
+      </div> -->
+
+      <div class="row" style="margin-bottom: 1rem">
+        <button type="button" id="btn-refresh">Refresh all reads</button>
+        <span id="status" class="hint" style="margin: 0"></span>
+      </div>
+
+      <div class="grid cols-2">
+        <section>
+          <h3>Configured addresses</h3>
+          <dl id="addr-list"></dl>
+        </section>
+        <section>
+          <h3>Endpoints</h3>
+          <dl id="endpoint-list"></dl>
+        </section>
+      </div>
+
+      <h2>Cadence (LiquidStaking + staking table)</h2>
+      <div class="grid cols-2">
+        <section>
+          <h3>Protocol totals (<code>cadence/scripts/admin/get_protocol_totals.cdc</code>)</h3>
+          <pre id="out-protocol-totals">—</pre>
+        </section>
+        <section>
+          <h3>Protocol config (<code>cadence/scripts/admin/get_protocol_config.cdc</code>)</h3>
+          <pre id="out-protocol-config">—</pre>
+        </section>
+        <section style="grid-column: 1 / -1">
+          <h3>Protocol delegator (<code>cadence/scripts/admin/get_delegator_info.cdc</code>)</h3>
+          <pre id="out-delegator">—</pre>
+        </section>
+      </div>
+
+      <h2>EVM (LSP vault + bridged sFlow)</h2>
+      <div class="grid cols-2">
+        <section>
+          <h3>Vault owner / sFlow token / rate / counts</h3>
+          <pre id="out-evm-meta">—</pre>
+        </section>
+        <section>
+          <h3>Vault config (<code>getConfig</code>)</h3>
+          <pre id="out-evm-config">—</pre>
+        </section>
+        <section>
+          <h3>Bridged sFlow balance (optional address)</h3>
+          <pre id="out-evm-balance">—</pre>
+        </section>
+        <section>
+          <h3>Recent stake requests (scan)</h3>
+          <pre id="out-stake-requests">—</pre>
+        </section>
+      </div>
+
+      <h2>User: EVM <code>requestStake()</code></h2>
+      <section>
+        <label for="stake-flow">Amount (FLOW, decimal string)</label>
+        <input type="text" id="stake-flow" value="0.1" autocomplete="off" />
+        <p class="hint" style="margin: 0.5rem 0 0">
+          Slippage is enforced on-chain from the vault’s <code>slippageTolerance</code> (<code>getConfig</code> above): the
+          contract derives <code>minAmountOut</code> per request; callers do not pass it.
+        </p>
+        <label for="evm-pk">EVM private key (hex, with or without 0x)</label>
+        <input type="password" id="evm-pk" autocomplete="off" placeholder="0x…" />
+        <button type="button" id="btn-evm-stake">Send <code>requestStake()</code> (payable)</button>
+        <div id="evm-stake-msg"></div>
+      </section>
+
+      <h2>Keeper: Cadence relayer (<code>RelayerRouter</code>)</h2>
+      <p class="hint">
+        Transactions live under <code>cadence/transactions/relayer/</code>: <code>handle_stakes.cdc</code>,
+        <code>initiate_unstakes.cdc</code>, <code>finalize_unstakes.cdc</code>, <code>compound_and_sync_rate.cdc</code>.
+        Bridge-crossing txs scope FLOW fees via <code>maxBridgeFlowFee</code> (<code>UFix64</code>). Set optional
+        <code>keeperFlowCliExtra</code> in config (for example <code>--config-path flow.deploy.json</code>). This page does not
+        accept a Cadence private key.
+      </p>
+      <section>
+        <label for="keeper-tx-kind">Relayer transaction</label>
+        <select id="keeper-tx-kind" style="width: 100%; margin-top: 0.25rem; padding: 0.45rem; border-radius: 6px; border: 1px solid var(--border); background: #0b0d11; color: var(--text); font-family: ui-monospace, monospace; font-size: 0.85rem">
+          <option value="handle_stakes">handle_stakes — stakeRequestIds + maxBridgeFlowFee</option>
+          <option value="initiate_unstakes">initiate_unstakes — unstakeRequestIds + maxBridgeFlowFee</option>
+          <option value="finalize_unstakes">finalize_unstakes — unstakeRequestIds only</option>
+          <option value="compound_and_sync_rate">compound_and_sync_rate — no arguments</option>
+        </select>
+        <label for="keeper-ids">UInt256 IDs (space- or comma-separated; same JSON array arg order as the Cadence tx)</label>
+        <input type="text" id="keeper-ids" value="1" autocomplete="off" />
+        <label for="keeper-max-bridge-fee">maxBridgeFlowFee (<code>UFix64</code>, ignored for finalize / compound)</label>
+        <input type="text" id="keeper-max-bridge-fee" value="10.0" autocomplete="off" />
+        <button type="button" id="btn-keeper-cmd" class="secondary">Build flow command</button>
+        <label style="margin-top: 1rem">Copy and run from repository root</label>
+        <textarea id="keeper-cmd" readonly spellcheck="false"></textarea>
+      </section>
+    </main>
+
+    <script defer src="config.sample.js"></script>
+    <script defer src="config.local.js"></script>
+    <script defer type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+---
+description: Flow liquid staking monorepo — Cadence core + Flow EVM vault
+alwaysApply: true
+---
+
+# Project context
+
+- **Cadence (Flow)**: Liquid staking protocol logic lives under `cadence/` (`contracts/`, `transactions/`, `scripts/`, `tests/`). Config: `flow.json`.
+- **Solidity (Foundry)**: Flow EVM deposit vault and EVM-side integrations live under `src/`, `test/`, `script/`. Config: `foundry.toml`, `remappings.txt`.
+- Prefer **official Flow docs** ([Flow Developer Portal](https://developers.flow.com/)) for Cadence, emulator, and Flow EVM bridging APIs.
+
+## Commands (local)
+
+- **Cadence tests**: `flow test` (requires [Flow CLI](https://developers.flow.com/build/guides/flow-cli)). Optional: `flow test --cover`.
+- **Emulator**: `flow emulator` (separate terminal), then deploy/scripts as you add them.
+- **Foundry**: `forge build`, `forge test`, `forge fmt`.
+- **Protocol deploy** (`./protocol-deploy.sh`, used by emulator integration): requires **python3** for staging `import "C"` → address imports for `contracts.add` (override with `SKIP_CADENCE_IMPORT_REWRITE=1`).
+
+## Reading scope
+
+- Do **not** read or quote large paths listed in `.cursorignore` (e.g. `lib/forge-std`) unless the task explicitly requires a specific small file (e.g. an interface).
+- Prefer project-owned files: `cadence/**`, `src/**`, `test/**`, `script/**`, `flow.json`, `foundry.toml`.

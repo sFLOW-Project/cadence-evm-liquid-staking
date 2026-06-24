@@ -1,0 +1,45 @@
+# Local stack for the keeper + Postgres (Drizzle).
+#
+# Postgres only (run keeper on host): docker compose up -d postgres
+# Full stack:                         docker compose up --build
+#
+# DATABASE_URL inside the keeper container uses hostname `postgres`.
+# From the host (e.g. drizzle-kit, psql), use localhost:5432 or the same URL with host.docker.internal if your tooling supports it.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keeper
+      POSTGRES_PASSWORD: keeper
+      POSTGRES_DB: keeper
+    ports:
+      - "5432:5432"
+    volumes:
+      - keeper_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keeper -d keeper"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keeper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://keeper:keeper@postgres:5432/keeper
+      EVM_RPC_URL: ${EVM_RPC_URL:?Set EVM_RPC_URL in keeper/.env or export it}
+      START_BLOCK: ${START_BLOCK:-1}
+    # Uncomment when the keeper exposes an HTTP port:
+    # ports:
+    #   - "3000:3000"
+
+volumes:
+  keeper_pgdata:

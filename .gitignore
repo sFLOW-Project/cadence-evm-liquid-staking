@@ -1,0 +1,37 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+
+# Local deployment record (copy from deployment/deployment.example.json)
+deployment/deployment.local.json
+
+# Flow CLI / Cadence tests
+coverage.json
+coverage.lcov
+coverage-html/
+imports/
+keeper/dist/
+.flow-fork*
+.flow-fork-e2e-*.json
+.flow-fork-e2e-emu-*.log
+
+# Never commit private keys (any name)
+*.pkey
+testnet-key.json
+
+# Demo dashboard local overrides (may contain addresses / secrets)
+demo/config.local.js
+node_modules/
+test-data.txt
+lcov.info

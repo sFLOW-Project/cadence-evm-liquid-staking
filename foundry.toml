@@ -1,0 +1,7 @@
+[profile.default]
+src = "evm/src"
+out = "evm/out"
+libs = ["lib"]
+test = "evm/test"
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

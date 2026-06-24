@@ -1,0 +1,12 @@
+---
+description: Cadence conventions for Flow liquid staking
+globs: "**/*.cdc"
+alwaysApply: false
+---
+
+# Cadence
+
+- Target **current Cadence 1.x** semantics and `access(all)` / capability patterns per Flow docs.
+- Register new contracts in `flow.json` (`contracts`, `deployments`, and `testing` aliases for `flow test` when tests deploy contracts).
+- Tests: files named `*_test.cdc` under `cadence/tests/`; use `import Test` and the Cadence testing framework.
+- Keep staking/accounting invariants explicit (shares vs underlying, pause flags, admin actions).

@@ -1,0 +1,12 @@
+---
+description: Solidity / Foundry for Flow EVM vault
+globs: "**/*.sol"
+alwaysApply: false
+---
+
+# Solidity (Flow EVM)
+
+- Use **Foundry** (`forge build`, `forge test`). Import test helpers via `forge-std/Test.sol` only in tests/scripts as needed.
+- EVM vault code should assume **Flow EVM** deployment context (chain id, predeploys, bridge patterns per current Flow EVM docs).
+- Follow checks-effects-interactions; document trust boundaries between Cadence-controlled state and EVM vault balances.
+- Do not copy entire `lib/forge-std` into context; use `remappings.txt` and cite only the snippets you need.
