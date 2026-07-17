@@ -44,7 +44,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     uint256 public unstakeRequestCount = 1;
 
     /// sFlow to Flow rate, starting with 1 to 1.
-    uint256 private _rate = 1e18;
+    uint256 private _rate = 1 ether;
 
     modifier onlyRouterCOA() {
         if (msg.sender != ROUTER_COA) revert NotRouterCOA();
