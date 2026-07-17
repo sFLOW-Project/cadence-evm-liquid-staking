@@ -18,6 +18,9 @@ abstract contract LSPVaultConfig is Ownable, ILSPVaultConfig {
     }
 
     function updateConfig(ILSPVaultConfig.Config calldata _newConfig) external onlyOwner {
+        if (_newConfig.slippageTolerance > MAX_SLIPPAGE_TOLERANCE) {
+            revert SlippageToleranceTooHigh(MAX_SLIPPAGE_TOLERANCE, _newConfig.slippageTolerance);
+        }
         ILSPVaultConfig.Config memory oldConfig = _config;
         _config = _newConfig;
         emit ConfigUpdated(oldConfig, _newConfig);
