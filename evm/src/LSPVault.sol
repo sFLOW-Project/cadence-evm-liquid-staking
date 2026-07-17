@@ -89,7 +89,12 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         uint256 requestId = stakeRequestCount;
 
         uint256 expectedSFlow = _sFlowFromFlow(msg.value);
-        uint256 minAmountOut = expectedSFlow * (1e18 - _config.slippageTolerance) / 1e18;
+        
+        uint256 afterSlippagePercentage;
+        unchecked {
+            afterSlippagePercentage = 1e18 - _config.slippageTolerance;
+        }
+        uint256 minAmountOut = expectedSFlow * afterSlippagePercentage / 1e18;
 
         stakeRequests[requestId] = StakeRequest({
             status: RequestStatus.QUEUED,
