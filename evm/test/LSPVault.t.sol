@@ -485,7 +485,7 @@ contract LSPVaultTest is Test {
         uint256 stakerBefore = staker.balance;
 
         vm.expectEmit(true, true, false, true);
-        emit ILSPVault.StakeCancelled(1, staker, 42 ether, 42 ether);
+        emit ILSPVault.StakeCancelled(1, staker, 42 ether);
 
         vm.prank(routerCOA);
         lspVault.cancelStakeRequestSlippage{value: 42 ether}(1);
@@ -500,26 +500,16 @@ contract LSPVaultTest is Test {
         assertEq(uint256(status), uint256(ILSPVault.RequestStatus.CANCELLED));
     }
 
-    function testCancelStakeRequestSlippage_partialRefund() public {
+    function testCancelStakeRequestSlippage_revertsIfPartialRefund() public {
         vm.prank(staker);
         lspVault.requestStake{value: 10 ether}();
 
         vm.prank(routerCOA);
         lspVault.withdrawPendingStakeNative(1);
 
-        uint256 stakerBefore = staker.balance;
-
-        vm.expectEmit(true, true, false, true);
-        emit ILSPVault.StakeCancelled(1, staker, 7 ether, 10 ether);
-
         vm.prank(routerCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.SlippageCancelValueMismatch.selector, 10 ether, 7 ether));
         lspVault.cancelStakeRequestSlippage{value: 7 ether}(1);
-
-        assertEq(lspVault.pendingWithdrawals(staker), 7 ether);
-        vm.prank(staker);
-        lspVault.claimPendingWithdrawal();
-        assertEq(staker.balance, stakerBefore + 7 ether);
-        assertEq(flowReceipt.balanceOf(staker), 0);
     }
 
     function testCancelStakeRequestSlippage_revertsIfRefundExceedsStake() public {
@@ -542,7 +532,7 @@ contract LSPVaultTest is Test {
         lspVault.withdrawPendingStakeNative(1);
 
         vm.prank(routerCOA);
-        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.SlippageCancelValueMismatch.selector, 10 ether, 0));
         lspVault.cancelStakeRequestSlippage{value: 0 ether}(1);
     }
 

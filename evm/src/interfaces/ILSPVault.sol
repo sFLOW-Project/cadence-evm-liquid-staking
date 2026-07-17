@@ -46,12 +46,12 @@ interface ILSPVault is ILSPVaultConfig {
     error InvalidRequest();
     error NativeTransferFailed();
     error NotRouterCOA();
-    error SlippageCancelValueMismatch(uint256 maxRefund, uint256 refund);
+    error SlippageCancelValueMismatch(uint256 expectedRefund, uint256 refund);
     error sFlowAmountTooLow(uint256 minAmountOut, uint256 sFlowAmount);
 
     // Events
     event StakeRequested(uint256 indexed id, address indexed user, uint256 amount);
-    event StakeCancelled(uint256 indexed id, address indexed user, uint256 refundWei, uint256 lockedAmountWei);
+    event StakeCancelled(uint256 indexed id, address indexed user, uint256 refundWei);
     event StakeFulfilled(uint256 indexed id, address indexed user, uint256 sFlowAmount);
     event UnstakeRequested(uint256 indexed id, address indexed user, uint256 amount);
     event UnstakeConfirmed(uint256 indexed id, address indexed user, uint256 flowAmount, uint256 unlockEpoch);
