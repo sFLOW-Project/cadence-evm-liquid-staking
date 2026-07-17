@@ -63,6 +63,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /// Deploy receipt to gain minter/burner rights.
     constructor(address _sFlowAddress, address _routerCOA) LSPVaultConfig(msg.sender) {
+        if (_routerCOA == address(0)) revert InvalidRouterCOA();
+        if (_sFlowAddress == address(0)) revert InvalidSFlowAddress();
         ROUTER_COA = _routerCOA;
         S_FLOW_ADDRESS = _sFlowAddress;
         FLOW_RECEIPT = new FlowReceipt();
