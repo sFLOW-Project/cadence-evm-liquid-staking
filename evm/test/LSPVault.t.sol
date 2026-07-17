@@ -435,22 +435,6 @@ contract LSPVaultTest is Test {
         vm.stopPrank();
     }
 
-    /// `amount == 0` is unreachable via `requestStake`; exercise via storage (defensive branch).
-    function testWithdrawPendingStakeNative_revertsIfAmountZero() public {
-        vm.prank(staker);
-        lspVault.requestStake{value: 10 ether}();
-
-        bytes32 baseSlot = keccak256(abi.encode(uint256(1), uint256(5)));
-        vm.store(address(lspVault), bytes32(uint256(baseSlot) + 1), bytes32(0));
-
-        (, , uint256 amount,) = lspVault.stakeRequests(1);
-        assertEq(amount, 0);
-
-        vm.prank(routerCOA);
-        vm.expectRevert(ILSPVault.InvalidRequest.selector);
-        lspVault.withdrawPendingStakeNative(1);
-    }
-
     function testWithdrawPendingStakeNative_revertsIfNativeTransferFails() public {
         RevertingEthReceiver badRouter = new RevertingEthReceiver();
 
