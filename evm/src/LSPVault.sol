@@ -38,10 +38,14 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     mapping(address => uint256) public pendingWithdrawals;
 
     /// Stake request IDs.
-    uint256 public stakeRequestCount = 1;
+    mapping(address => uint256) public stakeRequestCount;
 
     /// Unstake request IDs.
-    uint256 public unstakeRequestCount = 1;
+    mapping(address => uint256) public unstakeRequestCount;
+
+    /// Domain tags so stake/unstake ids never collide for the same `(user, nonce)`.
+    bytes32 private constant STAKE_REQUEST_DOMAIN = keccak256("LSPVault.stakeRequest");
+    bytes32 private constant UNSTAKE_REQUEST_DOMAIN = keccak256("LSPVault.unstakeRequest");
 
     /// sFlow to Flow rate, starting with 1 to 1.
     uint256 private _rate = 1e18;
@@ -49,6 +53,16 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     modifier onlyRouterCOA() {
         if (msg.sender != ROUTER_COA) revert NotRouterCOA();
         _;
+    }
+
+    function _nextStakeRequestId(address user) private view returns (uint256 requestId) {
+        uint256 nonce = stakeRequestCount[user];
+        requestId = uint256(keccak256(abi.encode(STAKE_REQUEST_DOMAIN, user, nonce)));
+    }
+
+    function _nextUnstakeRequestId(address user) private view returns (uint256 requestId) {
+        uint256 nonce = unstakeRequestCount[user];
+        requestId = uint256(keccak256(abi.encode(UNSTAKE_REQUEST_DOMAIN, user, nonce)));
     }
 
     /// @notice FLOW (wei) implied by `sFlowWei` at the current `syncRate` (same convention as Cadence `flowPerSFlow`).
@@ -86,7 +100,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         if (_config.isStakingPaused) revert StakingPaused();
         if (msg.value < _config.minRequestAmount) revert OperationAmountTooLow(_config.minRequestAmount, msg.value);
 
-        uint256 requestId = stakeRequestCount;
+        uint256 requestId = _nextStakeRequestId(msg.sender);
 
         uint256 expectedSFlow = _sFlowFromFlow(msg.value);
         uint256 minAmountOut = expectedSFlow * (1e18 - _config.slippageTolerance) / 1e18;
@@ -101,10 +115,10 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         FLOW_RECEIPT.mint(msg.sender, msg.value);
         receipts[requestId][ReceiptType.STAKE] = msg.value;
 
-        emit StakeRequested(stakeRequestCount, msg.sender, msg.value);
+        emit StakeRequested(requestId, msg.sender, msg.value);
 
         unchecked {
-            stakeRequestCount++;
+            stakeRequestCount[msg.sender]++;
         }
 
         return requestId;
@@ -124,7 +138,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
         IERC20(S_FLOW_ADDRESS).safeTransferFrom(msg.sender, address(this), _amount);
 
-        uint256 requestId = unstakeRequestCount;
+        uint256 requestId = _nextUnstakeRequestId(msg.sender);
 
         FLOW_RECEIPT.mint(msg.sender, flowEquivalent);
         receipts[requestId][ReceiptType.UNSTAKE] = flowEquivalent;
@@ -137,10 +151,10 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
             unlockEpoch: 0
         });
 
-        emit UnstakeRequested(unstakeRequestCount, msg.sender, _amount);
+        emit UnstakeRequested(requestId, msg.sender, _amount);
 
         unchecked {
-            unstakeRequestCount++;
+            unstakeRequestCount[msg.sender]++;
         }
 
         return requestId;
