@@ -24,9 +24,8 @@ abstract contract LSPVaultConfig is Ownable, ILSPVaultConfig {
     }
 
     function setMinRequestAmount(uint256 _minRequestAmount) external onlyOwner {
-        uint256 oldMinRequestAmount = _config.minRequestAmount;
+        emit MinRequestAmountUpdated(_config.minRequestAmount, _minRequestAmount);
         _config.minRequestAmount = _minRequestAmount;
-        emit MinRequestAmountUpdated(oldMinRequestAmount, _minRequestAmount);
     }
 
     function setIsStakingPaused(bool _isStakingPaused) external onlyOwner {
