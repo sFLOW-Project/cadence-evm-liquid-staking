@@ -292,6 +292,16 @@ contract LSPVaultTest is Test {
         lspVault.syncRate(2 ether);
     }
 
+    function testSyncRate_revertsIfZeroRate() public {
+        assertEq(lspVault.getRate(), 1 ether);
+
+        vm.prank(routerCOA);
+        vm.expectRevert(ILSPVault.InvalidRate.selector);
+        lspVault.syncRate(0);
+
+        assertEq(lspVault.getRate(), 1 ether);
+    }
+
     function testConfirmUnstakeRequestRevertsIfNotOwner() public {
         vm.prank(staker);
         vm.expectRevert(abi.encodeWithSelector(ILSPVault.NotRouterCOA.selector));
