@@ -116,6 +116,26 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     }
 
     /**
+     * Withdraws the funds of a queued stake request.
+     * @param _id id of the stake request.
+     * @custom:throws InvalidRequest if the request is not queued.
+     * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     */
+    function cancelStakeRequest(uint256 _id) external {
+        StakeRequest storage req = stakeRequests[_id];
+        if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
+        if (msg.sender != req.user) revert NotRequestOwner();
+
+        req.status = RequestStatus.CANCELLED;
+
+        FLOW_RECEIPT.burn(req.user, receipts[_id][ReceiptType.STAKE]);
+
+        pendingWithdrawals[req.user] += req.amount;
+
+        emit StakeCancelled(_id, req.user, req.amount, req.amount);
+    }
+
+    /**
      * Requests an unstake of sFlow. Locks sFlow in the vault for the keeper to bridge
      * to Cadence and process through the LSP.
      * @param _amount amount of sFlow to unstake.
@@ -149,6 +169,27 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         }
 
         return requestId;
+    }
+
+    /**
+     * Cancels an unstake request.
+     * @param _id id of the unstake request.
+     * @custom:throws InvalidRequest if the request is not queued.
+     * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     */
+    function cancelUnstakeRequest(uint256 _id) external {
+        UnstakeRequest storage req = unstakeRequests[_id];
+        // check if request is not already being processed
+        if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
+        if (msg.sender != req.user) revert NotRequestOwner();
+
+        req.status = RequestStatus.CANCELLED;
+
+        FLOW_RECEIPT.burn(req.user, receipts[_id][ReceiptType.UNSTAKE]);
+
+        IERC20(S_FLOW_ADDRESS).safeTransfer(req.user, req.amount);
+
+        emit UnstakeCancelled(_id, req.user, req.amount);
     }
 
     /// Claims pending FLOW to `msg.sender` (EOAs and contracts with `receive()`).
