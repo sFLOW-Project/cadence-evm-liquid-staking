@@ -181,9 +181,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /// Restricted to COA function, which syncs sFlow/Flow rate on EVM side.
     function syncRate(uint256 _newRate) external onlyRouterCOA {
-        uint256 oldRate = _rate;
+        emit RateUpdated(_rate, _newRate);
         _rate = _newRate;
-        emit RateUpdated(oldRate, _rate);
     }
 
     /**
