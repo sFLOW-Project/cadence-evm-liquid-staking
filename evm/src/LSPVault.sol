@@ -106,10 +106,10 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         FLOW_RECEIPT.mint(msg.sender, msg.value);
         receipts[requestId][ReceiptType.STAKE] = msg.value;
 
-        emit StakeRequested(stakeRequestCount, msg.sender, msg.value);
+        emit StakeRequested(requestId, msg.sender, msg.value);
 
         unchecked {
-            stakeRequestCount++;
+            stakeRequestCount = requestId + 1;
         }
 
         return requestId;
@@ -142,10 +142,10 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
             unlockEpoch: 0
         });
 
-        emit UnstakeRequested(unstakeRequestCount, msg.sender, _amount);
+        emit UnstakeRequested(requestId, msg.sender, _amount);
 
         unchecked {
-            unstakeRequestCount++;
+            unstakeRequestCount = requestId + 1;
         }
 
         return requestId;
