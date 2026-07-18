@@ -48,20 +48,18 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     bytes32 private constant UNSTAKE_REQUEST_DOMAIN = keccak256("LSPVault.unstakeRequest");
 
     /// sFlow to Flow rate, starting with 1 to 1.
-    uint256 private _rate = 1e18;
+    uint256 private _rate = 1 ether;
 
     modifier onlyRouterCOA() {
         if (msg.sender != ROUTER_COA) revert NotRouterCOA();
         _;
     }
 
-    function _nextStakeRequestId(address user) private view returns (uint256 requestId) {
-        uint256 nonce = stakeRequestCount[user];
+    function _nextStakeRequestId(address user, uint256 nonce) private view returns (uint256 requestId) {
         requestId = uint256(keccak256(abi.encode(STAKE_REQUEST_DOMAIN, user, nonce)));
     }
 
-    function _nextUnstakeRequestId(address user) private view returns (uint256 requestId) {
-        uint256 nonce = unstakeRequestCount[user];
+    function _nextUnstakeRequestId(address user, uint256 nonce) private view returns (uint256 requestId) {
         requestId = uint256(keccak256(abi.encode(UNSTAKE_REQUEST_DOMAIN, user, nonce)));
     }
 
@@ -77,6 +75,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /// Deploy receipt to gain minter/burner rights.
     constructor(address _sFlowAddress, address _routerCOA) LSPVaultConfig(msg.sender) {
+        if (_routerCOA == address(0)) revert InvalidRouterCOA();
+        if (_sFlowAddress == address(0)) revert InvalidSFlowAddress();
         ROUTER_COA = _routerCOA;
         S_FLOW_ADDRESS = _sFlowAddress;
         FLOW_RECEIPT = new FlowReceipt();
@@ -100,10 +100,16 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         if (_config.isStakingPaused) revert StakingPaused();
         if (msg.value < _config.minRequestAmount) revert OperationAmountTooLow(_config.minRequestAmount, msg.value);
 
-        uint256 requestId = _nextStakeRequestId(msg.sender);
+        uint256 nonce = stakeRequestCount[msg.sender];
+        uint256 requestId = _nextStakeRequestId(msg.sender, nonce);
 
         uint256 expectedSFlow = _sFlowFromFlow(msg.value);
-        uint256 minAmountOut = expectedSFlow * (1e18 - _config.slippageTolerance) / 1e18;
+        
+        uint256 afterSlippagePercentage;
+        unchecked {
+            afterSlippagePercentage = 1e18 - _config.slippageTolerance;
+        }
+        uint256 minAmountOut = expectedSFlow * afterSlippagePercentage / 1e18;
 
         stakeRequests[requestId] = StakeRequest({
             status: RequestStatus.QUEUED,
@@ -118,10 +124,30 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         emit StakeRequested(requestId, msg.sender, msg.value);
 
         unchecked {
-            stakeRequestCount[msg.sender]++;
+            stakeRequestCount[msg.sender] = nonce + 1;
         }
 
         return requestId;
+    }
+
+    /**
+     * Withdraws the funds of a queued stake request.
+     * @param _id id of the stake request.
+     * @custom:throws InvalidRequest if the request is not queued.
+     * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     */
+    function cancelStakeRequest(uint256 _id) external {
+        StakeRequest storage req = stakeRequests[_id];
+        if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
+        if (msg.sender != req.user) revert NotRequestOwner();
+
+        req.status = RequestStatus.CANCELLED;
+
+        FLOW_RECEIPT.burn(req.user, receipts[_id][ReceiptType.STAKE]);
+
+        pendingWithdrawals[req.user] += req.amount;
+
+        emit StakeCancelled(_id, req.user, req.amount);
     }
 
     /**
@@ -138,7 +164,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
         IERC20(S_FLOW_ADDRESS).safeTransferFrom(msg.sender, address(this), _amount);
 
-        uint256 requestId = _nextUnstakeRequestId(msg.sender);
+        uint256 nonce = unstakeRequestCount[msg.sender];
+        uint256 requestId = _nextUnstakeRequestId(msg.sender, nonce);
 
         FLOW_RECEIPT.mint(msg.sender, flowEquivalent);
         receipts[requestId][ReceiptType.UNSTAKE] = flowEquivalent;
@@ -154,10 +181,31 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         emit UnstakeRequested(requestId, msg.sender, _amount);
 
         unchecked {
-            unstakeRequestCount[msg.sender]++;
+            unstakeRequestCount[msg.sender] = nonce + 1;
         }
 
         return requestId;
+    }
+
+    /**
+     * Cancels an unstake request.
+     * @param _id id of the unstake request.
+     * @custom:throws InvalidRequest if the request is not queued.
+     * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     */
+    function cancelUnstakeRequest(uint256 _id) external {
+        UnstakeRequest storage req = unstakeRequests[_id];
+        // check if request is not already being processed
+        if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
+        if (msg.sender != req.user) revert NotRequestOwner();
+
+        req.status = RequestStatus.CANCELLED;
+
+        FLOW_RECEIPT.burn(req.user, receipts[_id][ReceiptType.UNSTAKE]);
+
+        IERC20(S_FLOW_ADDRESS).safeTransfer(req.user, req.amount);
+
+        emit UnstakeCancelled(_id, req.user, req.amount);
     }
 
     /// Claims pending FLOW to `msg.sender` (EOAs and contracts with `receive()`).
@@ -195,9 +243,9 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /// Restricted to COA function, which syncs sFlow/Flow rate on EVM side.
     function syncRate(uint256 _newRate) external onlyRouterCOA {
-        uint256 oldRate = _rate;
+        if (_newRate == 0) revert InvalidRate();
+        emit RateUpdated(_rate, _newRate);
         _rate = _newRate;
-        emit RateUpdated(oldRate, _rate);
     }
 
     /**
@@ -218,15 +266,14 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /**
      * @notice After `withdrawPendingStakeNative`, Cadence may refuse to stake if the implied sFlow is below `minAmountOut`.
-     * @dev Refunds `msg.value` native to the user (may be `< req.amount` if the router withheld FLOW on Cadence for the relayer). Burns `req.amount` receipts.
+     * @dev Refunds the full `req.amount` in native FLOW to the user. Burns stake receipts.
      */
     function cancelStakeRequestSlippage(uint256 _id) external payable onlyRouterCOA {
         StakeRequest storage req = stakeRequests[_id];
         if (req.status != RequestStatus.AWAITING_FULFILLMENT) revert InvalidRequest();
 
-        uint256 refund = msg.value;
-        if (refund == 0) revert InvalidRequest();
-        if (refund > req.amount) revert SlippageCancelValueMismatch(req.amount, refund);
+        uint256 refund = req.amount;
+        if (msg.value != refund) revert SlippageCancelValueMismatch(refund, msg.value);
 
         req.status = RequestStatus.CANCELLED;
 
@@ -234,7 +281,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
         pendingWithdrawals[req.user] += refund;
 
-        emit StakeCancelled(_id, req.user, refund, req.amount);
+        emit StakeCancelled(_id, req.user, refund);
     }
 
     /**
@@ -275,28 +322,29 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     }
 
     /// Pull native FLOW locked for a pending stake to the COA (`msg.sender`) for bridging to Cadence.
-    function withdrawPendingStakeNative(uint256 _id) external onlyRouterCOA returns (uint256 amount) {
+    function withdrawPendingStakeNative(uint256 _id) external onlyRouterCOA returns (uint256) {
         StakeRequest storage req = stakeRequests[_id];
         if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
 
-        amount = req.amount;
-        if (amount == 0) revert InvalidRequest();
-
         req.status = RequestStatus.AWAITING_FULFILLMENT;
 
-        (bool ok,) = payable(msg.sender).call{value: amount}("");
+        (bool ok,) = payable(msg.sender).call{value: req.amount}("");
         if (!ok) revert NativeTransferFailed();
+
+        return req.amount;
     }
 
     /// Pull locked sFlow for a pending unstake to the COA (`msg.sender`) for bridging to Cadence.
-    function withdrawPendingUnstakeSFlow(uint256 _id) external onlyRouterCOA returns (uint256 amount) {
+    function withdrawPendingUnstakeSFlow(uint256 _id) external onlyRouterCOA returns (uint256) {
         UnstakeRequest storage req = unstakeRequests[_id];
         if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
 
+
         req.status = RequestStatus.AWAITING_FULFILLMENT;
 
-        amount = req.amount;
-        IERC20(S_FLOW_ADDRESS).safeTransfer(msg.sender, amount);
+        IERC20(S_FLOW_ADDRESS).safeTransfer(msg.sender, req.amount);
+
+        return req.amount;
     }
 
     /////////////////////////////////////////////////////////////////

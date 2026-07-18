@@ -114,6 +114,78 @@ contract LSPVaultTest is Test {
         assertEq(address(lspVault).balance, 1000 ether);
     }
 
+    function testCancelStakeRequest_creditsUserAndEmits() public {
+        vm.prank(staker);
+        uint256 reqId = lspVault.requestStake{value: 25 ether}();
+
+        uint256 stakerBefore = staker.balance;
+
+        vm.expectEmit(true, true, false, true);
+        emit ILSPVault.StakeCancelled(reqId, staker, 25 ether);
+
+        vm.prank(staker);
+        lspVault.cancelStakeRequest(reqId);
+
+        assertEq(flowReceipt.balanceOf(staker), 0);
+        assertEq(lspVault.pendingWithdrawals(staker), 25 ether);
+
+        (ILSPVault.RequestStatus status,,,) = lspVault.stakeRequests(reqId);
+        assertEq(uint256(status), uint256(ILSPVault.RequestStatus.CANCELLED));
+
+        vm.prank(staker);
+        lspVault.claimPendingWithdrawal();
+        assertEq(staker.balance, stakerBefore + 25 ether);
+        assertEq(lspVault.pendingWithdrawals(staker), 0);
+    }
+
+    function testCancelStakeRequest_succeedsImmediatelyAfterRequest() public {
+        vm.prank(staker);
+        uint256 reqId = lspVault.requestStake{value: 10 ether}();
+
+        vm.prank(staker);
+        lspVault.cancelStakeRequest(reqId);
+
+        assertEq(lspVault.pendingWithdrawals(staker), 10 ether);
+    }
+
+    function testCancelStakeRequest_revertsIfNotOwner() public {
+        vm.prank(staker);
+        uint256 reqId = lspVault.requestStake{value: 10 ether}();
+
+        vm.prank(routerCOA);
+        vm.expectRevert(ILSPVault.NotRequestOwner.selector);
+        lspVault.cancelStakeRequest(reqId);
+    }
+
+    function testCancelStakeRequest_revertsIfNotQueued() public {
+        vm.prank(staker);
+        uint256 reqId = lspVault.requestStake{value: 10 ether}();
+
+        vm.prank(routerCOA);
+        lspVault.withdrawPendingStakeNative(reqId);
+
+        vm.prank(staker);
+        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        lspVault.cancelStakeRequest(reqId);
+    }
+
+    function testCancelStakeRequest_revertsIfAlreadyCancelled() public {
+        vm.prank(staker);
+        uint256 reqId = lspVault.requestStake{value: 10 ether}();
+
+        vm.prank(staker);
+        lspVault.cancelStakeRequest(reqId);
+
+        vm.prank(staker);
+        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        lspVault.cancelStakeRequest(reqId);
+    }
+
+    function testCancelStakeRequest_revertsIfUnknownRequestId() public {
+        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        lspVault.cancelStakeRequest(999);
+    }
+
     function testRequestUnstake() public {
         sFlow.mint(staker, 100 ether);
         vm.startPrank(staker);
@@ -123,6 +195,107 @@ contract LSPVaultTest is Test {
 
         assertEq(sFlow.balanceOf(address(lspVault)), 100 ether);
         assertEq(sFlow.balanceOf(staker), 0);
+    }
+
+    function testCancelUnstakeRequest_returnsSFlowAndEmits() public {
+        sFlow.mint(staker, 50 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 50 ether);
+        uint256 reqId = lspVault.requestUnstake(50 ether);
+        vm.stopPrank();
+
+        vm.expectEmit(true, true, false, true);
+        emit ILSPVault.UnstakeCancelled(reqId, staker, 50 ether);
+
+        vm.prank(staker);
+        lspVault.cancelUnstakeRequest(reqId);
+
+        assertEq(flowReceipt.balanceOf(staker), 0);
+        assertEq(sFlow.balanceOf(staker), 50 ether);
+        assertEq(sFlow.balanceOf(address(lspVault)), 0);
+
+        (ILSPVault.RequestStatus status,,,,) = lspVault.unstakeRequests(reqId);
+        assertEq(uint256(status), uint256(ILSPVault.RequestStatus.CANCELLED));
+    }
+
+    function testCancelUnstakeRequest_succeedsImmediatelyAfterRequest() public {
+        sFlow.mint(staker, 20 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 20 ether);
+        uint256 reqId = lspVault.requestUnstake(20 ether);
+        vm.stopPrank();
+
+        vm.prank(staker);
+        lspVault.cancelUnstakeRequest(reqId);
+
+        assertEq(sFlow.balanceOf(staker), 20 ether);
+        assertEq(sFlow.balanceOf(address(lspVault)), 0);
+    }
+
+    function testCancelUnstakeRequest_revertsIfNotOwner() public {
+        sFlow.mint(staker, 10 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 10 ether);
+        uint256 reqId = lspVault.requestUnstake(10 ether);
+        vm.stopPrank();
+
+        vm.prank(routerCOA);
+        vm.expectRevert(ILSPVault.NotRequestOwner.selector);
+        lspVault.cancelUnstakeRequest(reqId);
+    }
+
+    function testCancelUnstakeRequest_revertsIfNotQueued() public {
+        sFlow.mint(staker, 10 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 10 ether);
+        uint256 reqId = lspVault.requestUnstake(10 ether);
+        vm.stopPrank();
+
+        vm.prank(routerCOA);
+        lspVault.withdrawPendingUnstakeSFlow(reqId);
+
+        vm.prank(staker);
+        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        lspVault.cancelUnstakeRequest(reqId);
+    }
+
+    function testCancelUnstakeRequest_revertsIfAlreadyCancelled() public {
+        sFlow.mint(staker, 10 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 10 ether);
+        uint256 reqId = lspVault.requestUnstake(10 ether);
+        vm.stopPrank();
+
+        vm.prank(staker);
+        lspVault.cancelUnstakeRequest(reqId);
+
+        vm.prank(staker);
+        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        lspVault.cancelUnstakeRequest(reqId);
+    }
+
+    function testCancelUnstakeRequest_revertsIfUnknownRequestId() public {
+        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        lspVault.cancelUnstakeRequest(999);
+    }
+
+    function testCancelUnstakeRequest_burnsFlowDenominatedReceiptWhenRateAboveOne() public {
+        vm.prank(routerCOA);
+        lspVault.syncRate(2 ether);
+
+        sFlow.mint(staker, 10 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 10 ether);
+        uint256 reqId = lspVault.requestUnstake(10 ether);
+        vm.stopPrank();
+
+        assertEq(flowReceipt.balanceOf(staker), 20 ether);
+
+        vm.prank(staker);
+        lspVault.cancelUnstakeRequest(reqId);
+
+        assertEq(flowReceipt.balanceOf(staker), 0);
+        assertEq(sFlow.balanceOf(staker), 10 ether);
     }
 
     function testFulfillStakeRequest() public {
@@ -300,6 +473,16 @@ contract LSPVaultTest is Test {
         lspVault.syncRate(2 ether);
     }
 
+    function testSyncRate_revertsIfZeroRate() public {
+        assertEq(lspVault.getRate(), 1 ether);
+
+        vm.prank(routerCOA);
+        vm.expectRevert(ILSPVault.InvalidRate.selector);
+        lspVault.syncRate(0);
+
+        assertEq(lspVault.getRate(), 1 ether);
+    }
+
     function testConfirmUnstakeRequestRevertsIfNotOwner() public {
         vm.prank(staker);
         vm.expectRevert(abi.encodeWithSelector(ILSPVault.NotRouterCOA.selector));
@@ -447,8 +630,8 @@ contract LSPVaultTest is Test {
         vm.stopPrank();
     }
 
-    /// `amount == 0` is unreachable via `requestStake`; exercise via storage (defensive branch).
-    function testWithdrawPendingStakeNative_revertsIfAmountZero() public {
+    /// `amount == 0` is unreachable via `requestStake`; if corrupted in storage, withdraw sends 0 wei.
+    function testWithdrawPendingStakeNative_withZeroAmountInStorage() public {
         vm.prank(staker);
         uint256 reqId = lspVault.requestStake{value: 10 ether}();
 
@@ -460,8 +643,11 @@ contract LSPVaultTest is Test {
         assertEq(amount, 0);
 
         vm.prank(routerCOA);
-        vm.expectRevert(ILSPVault.InvalidRequest.selector);
-        lspVault.withdrawPendingStakeNative(reqId);
+        uint256 withdrawn = lspVault.withdrawPendingStakeNative(reqId);
+        assertEq(withdrawn, 0);
+
+        (ILSPVault.RequestStatus status,,,) = lspVault.stakeRequests(reqId);
+        assertEq(uint256(status), uint256(ILSPVault.RequestStatus.AWAITING_FULFILLMENT));
     }
 
     function testWithdrawPendingStakeNative_revertsIfNativeTransferFails() public {
@@ -498,7 +684,7 @@ contract LSPVaultTest is Test {
         uint256 stakerBefore = staker.balance;
 
         vm.expectEmit(true, true, false, true);
-        emit ILSPVault.StakeCancelled(reqId, staker, 42 ether, 42 ether);
+        emit ILSPVault.StakeCancelled(reqId, staker, 42 ether);
 
         vm.prank(routerCOA);
         lspVault.cancelStakeRequestSlippage{value: 42 ether}(reqId);
@@ -513,26 +699,17 @@ contract LSPVaultTest is Test {
         assertEq(uint256(status), uint256(ILSPVault.RequestStatus.CANCELLED));
     }
 
-    function testCancelStakeRequestSlippage_partialRefund() public {
+    /// Slippage cancel requires the router to return the full locked stake amount.
+    function testCancelStakeRequestSlippage_revertsIfPartialRefund() public {
         vm.prank(staker);
         uint256 reqId = lspVault.requestStake{value: 10 ether}();
 
         vm.prank(routerCOA);
         lspVault.withdrawPendingStakeNative(reqId);
 
-        uint256 stakerBefore = staker.balance;
-
-        vm.expectEmit(true, true, false, true);
-        emit ILSPVault.StakeCancelled(reqId, staker, 7 ether, 10 ether);
-
         vm.prank(routerCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.SlippageCancelValueMismatch.selector, 10 ether, 7 ether));
         lspVault.cancelStakeRequestSlippage{value: 7 ether}(reqId);
-
-        assertEq(lspVault.pendingWithdrawals(staker), 7 ether);
-        vm.prank(staker);
-        lspVault.claimPendingWithdrawal();
-        assertEq(staker.balance, stakerBefore + 7 ether);
-        assertEq(flowReceipt.balanceOf(staker), 0);
     }
 
     function testCancelStakeRequestSlippage_revertsIfRefundExceedsStake() public {
@@ -555,7 +732,7 @@ contract LSPVaultTest is Test {
         lspVault.withdrawPendingStakeNative(reqId);
 
         vm.prank(routerCOA);
-        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.SlippageCancelValueMismatch.selector, 10 ether, 0));
         lspVault.cancelStakeRequestSlippage{value: 0 ether}(reqId);
     }
 
