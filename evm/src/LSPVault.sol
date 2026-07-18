@@ -208,15 +208,14 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /**
      * @notice After `withdrawPendingStakeNative`, Cadence may refuse to stake if the implied sFlow is below `minAmountOut`.
-     * @dev Refunds `msg.value` native to the user (may be `< req.amount` if the router withheld FLOW on Cadence for the relayer). Burns `req.amount` receipts.
+     * @dev Refunds the full `req.amount` in native FLOW to the user. Burns stake receipts.
      */
     function cancelStakeRequestSlippage(uint256 _id) external payable onlyRouterCOA {
         StakeRequest storage req = stakeRequests[_id];
         if (req.status != RequestStatus.AWAITING_FULFILLMENT) revert InvalidRequest();
 
-        uint256 refund = msg.value;
-        if (refund == 0) revert InvalidRequest();
-        if (refund > req.amount) revert SlippageCancelValueMismatch(req.amount, refund);
+        uint256 refund = req.amount;
+        if (msg.value != refund) revert SlippageCancelValueMismatch(refund, msg.value);
 
         req.status = RequestStatus.CANCELLED;
 
@@ -224,7 +223,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
         pendingWithdrawals[req.user] += refund;
 
-        emit StakeCancelled(_id, req.user, refund, req.amount);
+        emit StakeCancelled(_id, req.user, refund);
     }
 
     /**
