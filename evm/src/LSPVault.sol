@@ -44,7 +44,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     uint256 public unstakeRequestCount = 1;
 
     /// sFlow to Flow rate, starting with 1 to 1.
-    uint256 private _rate = 1e18;
+    uint256 private _rate = 1 ether;
 
     modifier onlyRouterCOA() {
         if (msg.sender != ROUTER_COA) revert NotRouterCOA();
@@ -89,7 +89,12 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         uint256 requestId = stakeRequestCount;
 
         uint256 expectedSFlow = _sFlowFromFlow(msg.value);
-        uint256 minAmountOut = expectedSFlow * (1e18 - _config.slippageTolerance) / 1e18;
+        
+        uint256 afterSlippagePercentage;
+        unchecked {
+            afterSlippagePercentage = 1e18 - _config.slippageTolerance;
+        }
+        uint256 minAmountOut = expectedSFlow * afterSlippagePercentage / 1e18;
 
         stakeRequests[requestId] = StakeRequest({
             status: RequestStatus.QUEUED,
@@ -101,10 +106,10 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         FLOW_RECEIPT.mint(msg.sender, msg.value);
         receipts[requestId][ReceiptType.STAKE] = msg.value;
 
-        emit StakeRequested(stakeRequestCount, msg.sender, msg.value);
+        emit StakeRequested(requestId, msg.sender, msg.value);
 
         unchecked {
-            stakeRequestCount++;
+            stakeRequestCount = requestId + 1;
         }
 
         return requestId;
@@ -137,10 +142,10 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
             unlockEpoch: 0
         });
 
-        emit UnstakeRequested(unstakeRequestCount, msg.sender, _amount);
+        emit UnstakeRequested(requestId, msg.sender, _amount);
 
         unchecked {
-            unstakeRequestCount++;
+            unstakeRequestCount = requestId + 1;
         }
 
         return requestId;
@@ -181,9 +186,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /// Restricted to COA function, which syncs sFlow/Flow rate on EVM side.
     function syncRate(uint256 _newRate) external onlyRouterCOA {
-        uint256 oldRate = _rate;
+        emit RateUpdated(_rate, _newRate);
         _rate = _newRate;
-        emit RateUpdated(oldRate, _rate);
     }
 
     /**
