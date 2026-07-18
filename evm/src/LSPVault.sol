@@ -44,7 +44,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     uint256 public unstakeRequestCount = 1;
 
     /// sFlow to Flow rate, starting with 1 to 1.
-    uint256 private _rate = 1e18;
+    uint256 private _rate = 1 ether;
 
     modifier onlyRouterCOA() {
         if (msg.sender != ROUTER_COA) revert NotRouterCOA();
@@ -89,7 +89,12 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         uint256 requestId = stakeRequestCount;
 
         uint256 expectedSFlow = _sFlowFromFlow(msg.value);
-        uint256 minAmountOut = expectedSFlow * (1e18 - _config.slippageTolerance) / 1e18;
+        
+        uint256 afterSlippagePercentage;
+        unchecked {
+            afterSlippagePercentage = 1e18 - _config.slippageTolerance;
+        }
+        uint256 minAmountOut = expectedSFlow * afterSlippagePercentage / 1e18;
 
         stakeRequests[requestId] = StakeRequest({
             status: RequestStatus.QUEUED,
@@ -101,13 +106,33 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         FLOW_RECEIPT.mint(msg.sender, msg.value);
         receipts[requestId][ReceiptType.STAKE] = msg.value;
 
-        emit StakeRequested(stakeRequestCount, msg.sender, msg.value);
+        emit StakeRequested(requestId, msg.sender, msg.value);
 
         unchecked {
-            stakeRequestCount++;
+            stakeRequestCount = requestId + 1;
         }
 
         return requestId;
+    }
+
+    /**
+     * Withdraws the funds of a queued stake request.
+     * @param _id id of the stake request.
+     * @custom:throws InvalidRequest if the request is not queued.
+     * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     */
+    function cancelStakeRequest(uint256 _id) external {
+        StakeRequest storage req = stakeRequests[_id];
+        if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
+        if (msg.sender != req.user) revert NotRequestOwner();
+
+        req.status = RequestStatus.CANCELLED;
+
+        FLOW_RECEIPT.burn(req.user, receipts[_id][ReceiptType.STAKE]);
+
+        pendingWithdrawals[req.user] += req.amount;
+
+        emit StakeCancelled(_id, req.user, req.amount);
     }
 
     /**
@@ -137,13 +162,34 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
             unlockEpoch: 0
         });
 
-        emit UnstakeRequested(unstakeRequestCount, msg.sender, _amount);
+        emit UnstakeRequested(requestId, msg.sender, _amount);
 
         unchecked {
-            unstakeRequestCount++;
+            unstakeRequestCount = requestId + 1;
         }
 
         return requestId;
+    }
+
+    /**
+     * Cancels an unstake request.
+     * @param _id id of the unstake request.
+     * @custom:throws InvalidRequest if the request is not queued.
+     * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     */
+    function cancelUnstakeRequest(uint256 _id) external {
+        UnstakeRequest storage req = unstakeRequests[_id];
+        // check if request is not already being processed
+        if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
+        if (msg.sender != req.user) revert NotRequestOwner();
+
+        req.status = RequestStatus.CANCELLED;
+
+        FLOW_RECEIPT.burn(req.user, receipts[_id][ReceiptType.UNSTAKE]);
+
+        IERC20(S_FLOW_ADDRESS).safeTransfer(req.user, req.amount);
+
+        emit UnstakeCancelled(_id, req.user, req.amount);
     }
 
     /// Claims pending FLOW to `msg.sender` (EOAs and contracts with `receive()`).
@@ -182,9 +228,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     /// Restricted to COA function, which syncs sFlow/Flow rate on EVM side.
     function syncRate(uint256 _newRate) external onlyRouterCOA {
         if (_newRate == 0) revert InvalidRate();
-        uint256 oldRate = _rate;
+        emit RateUpdated(_rate, _newRate);
         _rate = _newRate;
-        emit RateUpdated(oldRate, _rate);
     }
 
     /**
@@ -205,15 +250,14 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
     /**
      * @notice After `withdrawPendingStakeNative`, Cadence may refuse to stake if the implied sFlow is below `minAmountOut`.
-     * @dev Refunds `msg.value` native to the user (may be `< req.amount` if the router withheld FLOW on Cadence for the relayer). Burns `req.amount` receipts.
+     * @dev Refunds the full `req.amount` in native FLOW to the user. Burns stake receipts.
      */
     function cancelStakeRequestSlippage(uint256 _id) external payable onlyRouterCOA {
         StakeRequest storage req = stakeRequests[_id];
         if (req.status != RequestStatus.AWAITING_FULFILLMENT) revert InvalidRequest();
 
-        uint256 refund = msg.value;
-        if (refund == 0) revert InvalidRequest();
-        if (refund > req.amount) revert SlippageCancelValueMismatch(req.amount, refund);
+        uint256 refund = req.amount;
+        if (msg.value != refund) revert SlippageCancelValueMismatch(refund, msg.value);
 
         req.status = RequestStatus.CANCELLED;
 
@@ -221,7 +265,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
         pendingWithdrawals[req.user] += refund;
 
-        emit StakeCancelled(_id, req.user, refund, req.amount);
+        emit StakeCancelled(_id, req.user, refund);
     }
 
     /**
