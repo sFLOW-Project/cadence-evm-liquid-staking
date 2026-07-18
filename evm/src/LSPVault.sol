@@ -132,7 +132,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
 
         pendingWithdrawals[req.user] += req.amount;
 
-        emit StakeCancelled(_id, req.user, req.amount, req.amount);
+        emit StakeCancelled(_id, req.user, req.amount);
     }
 
     /**

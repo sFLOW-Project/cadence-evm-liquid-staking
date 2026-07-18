@@ -113,7 +113,7 @@ contract LSPVaultTest is Test {
         uint256 stakerBefore = staker.balance;
 
         vm.expectEmit(true, true, false, true);
-        emit ILSPVault.StakeCancelled(1, staker, 25 ether, 25 ether);
+        emit ILSPVault.StakeCancelled(1, staker, 25 ether);
 
         vm.prank(staker);
         lspVault.cancelStakeRequest(1);
