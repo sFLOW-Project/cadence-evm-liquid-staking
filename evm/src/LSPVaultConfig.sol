@@ -18,33 +18,31 @@ abstract contract LSPVaultConfig is Ownable, ILSPVaultConfig {
     }
 
     function updateConfig(ILSPVaultConfig.Config calldata _newConfig) external onlyOwner {
-        ILSPVaultConfig.Config memory oldConfig = _config;
+        if (_newConfig.slippageTolerance > MAX_SLIPPAGE_TOLERANCE) {
+            revert SlippageToleranceTooHigh(MAX_SLIPPAGE_TOLERANCE, _newConfig.slippageTolerance);
+        }
+        emit ConfigUpdated(_config, _newConfig);
         _config = _newConfig;
-        emit ConfigUpdated(oldConfig, _newConfig);
     }
 
     function setMinRequestAmount(uint256 _minRequestAmount) external onlyOwner {
-        uint256 oldMinRequestAmount = _config.minRequestAmount;
+        emit MinRequestAmountUpdated(_config.minRequestAmount, _minRequestAmount);
         _config.minRequestAmount = _minRequestAmount;
-        emit MinRequestAmountUpdated(oldMinRequestAmount, _minRequestAmount);
     }
 
     function setIsStakingPaused(bool _isStakingPaused) external onlyOwner {
-        bool oldIsStakingPaused = _config.isStakingPaused;
+        emit IsStakingPausedUpdated(_config.isStakingPaused, _isStakingPaused);
         _config.isStakingPaused = _isStakingPaused;
-        emit IsStakingPausedUpdated(oldIsStakingPaused, _isStakingPaused);
     }
 
     function setProtocolFee(uint256 _protocolFee) external onlyOwner {
-        uint256 oldProtocolFee = _config.protocolFee;
+        emit ProtocolFeeUpdated(_config.protocolFee, _protocolFee);
         _config.protocolFee = _protocolFee;
-        emit ProtocolFeeUpdated(oldProtocolFee, _protocolFee);
     }
 
     function setSlippageTolerance(uint256 _slippageTolerance) external onlyOwner {
         if (_slippageTolerance > MAX_SLIPPAGE_TOLERANCE) revert SlippageToleranceTooHigh(MAX_SLIPPAGE_TOLERANCE, _slippageTolerance);
-        uint256 oldSlippageTolerance = _config.slippageTolerance;
+        emit SlippageToleranceUpdated(_config.slippageTolerance, _slippageTolerance);
         _config.slippageTolerance = _slippageTolerance;
-        emit SlippageToleranceUpdated(oldSlippageTolerance, _slippageTolerance);
     }
 }

@@ -46,24 +46,29 @@ interface ILSPVault is ILSPVaultConfig {
     error InvalidRequest();
     error NativeTransferFailed();
     error NotRouterCOA();
-    error SlippageCancelValueMismatch(uint256 maxRefund, uint256 refund);
+    error SlippageCancelValueMismatch(uint256 expectedRefund, uint256 refund);
     error sFlowAmountTooLow(uint256 minAmountOut, uint256 sFlowAmount);
     error InvalidRouterCOA();
     error InvalidSFlowAddress();
+    error InvalidRate();
+    error NotRequestOwner();
 
     // Events
     event StakeRequested(uint256 indexed id, address indexed user, uint256 amount);
-    event StakeCancelled(uint256 indexed id, address indexed user, uint256 refundWei, uint256 lockedAmountWei);
+    event StakeCancelled(uint256 indexed id, address indexed user, uint256 refundWei);
     event StakeFulfilled(uint256 indexed id, address indexed user, uint256 sFlowAmount);
     event UnstakeRequested(uint256 indexed id, address indexed user, uint256 amount);
     event UnstakeConfirmed(uint256 indexed id, address indexed user, uint256 flowAmount, uint256 unlockEpoch);
     event UnstakeFulfilled(uint256 indexed id, address indexed user, uint256 amount);
+    event UnstakeCancelled(uint256 indexed id, address indexed user, uint256 amount);
     event WithdrawalClaimed(address indexed user, address indexed recipient, uint256 amount);
     event RateUpdated(uint256 oldRate, uint256 newRate);
 
     // Functions
     function requestStake() external payable returns (uint256);
     function requestUnstake(uint256 _amount) external returns (uint256);
+    function cancelStakeRequest(uint256 _id) external;
+    function cancelUnstakeRequest(uint256 _id) external;
     function fulfillStakeRequest(uint256 _id, uint256 _sFlowAmount) external;
     function fulfillUnstakeRequest(uint256 _id) external;
     function withdrawPendingStakeNative(uint256 _id) external returns (uint256 amount);
