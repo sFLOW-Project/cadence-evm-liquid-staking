@@ -306,28 +306,29 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     }
 
     /// Pull native FLOW locked for a pending stake to the COA (`msg.sender`) for bridging to Cadence.
-    function withdrawPendingStakeNative(uint256 _id) external onlyRouterCOA returns (uint256 amount) {
+    function withdrawPendingStakeNative(uint256 _id) external onlyRouterCOA returns (uint256) {
         StakeRequest storage req = stakeRequests[_id];
         if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
 
-        amount = req.amount;
-        if (amount == 0) revert InvalidRequest();
-
         req.status = RequestStatus.AWAITING_FULFILLMENT;
 
-        (bool ok,) = payable(msg.sender).call{value: amount}("");
+        (bool ok,) = payable(msg.sender).call{value: req.amount}("");
         if (!ok) revert NativeTransferFailed();
+
+        return req.amount;
     }
 
     /// Pull locked sFlow for a pending unstake to the COA (`msg.sender`) for bridging to Cadence.
-    function withdrawPendingUnstakeSFlow(uint256 _id) external onlyRouterCOA returns (uint256 amount) {
+    function withdrawPendingUnstakeSFlow(uint256 _id) external onlyRouterCOA returns (uint256) {
         UnstakeRequest storage req = unstakeRequests[_id];
         if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
 
+
         req.status = RequestStatus.AWAITING_FULFILLMENT;
 
-        amount = req.amount;
-        IERC20(S_FLOW_ADDRESS).safeTransfer(msg.sender, amount);
+        IERC20(S_FLOW_ADDRESS).safeTransfer(msg.sender, req.amount);
+
+        return req.amount;
     }
 
     /////////////////////////////////////////////////////////////////
