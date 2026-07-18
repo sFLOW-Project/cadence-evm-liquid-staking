@@ -48,6 +48,7 @@ interface ILSPVault is ILSPVaultConfig {
     error NotRouterCOA();
     error SlippageCancelValueMismatch(uint256 expectedRefund, uint256 refund);
     error sFlowAmountTooLow(uint256 minAmountOut, uint256 sFlowAmount);
+    error InvalidRate();
     error NotRequestOwner();
 
     // Events
