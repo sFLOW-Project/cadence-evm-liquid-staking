@@ -16,6 +16,12 @@ import {ILSPVault} from "./interfaces/ILSPVault.sol";
 contract LSPVault is LSPVaultConfig, ILSPVault {
     using SafeERC20 for IERC20;
 
+    /// Constant for 1 ether.
+    uint256 public constant ONE_ETHER = 1e18;
+
+    /// Constant for 18 decimals precision.
+    uint256 public constant PRECISION = 1e18;
+
     /// Address of the router COA.
     address public immutable ROUTER_COA;
 
@@ -48,29 +54,29 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     bytes32 private constant UNSTAKE_REQUEST_DOMAIN = keccak256("LSPVault.unstakeRequest");
 
     /// sFlow to Flow rate, starting with 1 to 1.
-    uint256 private _rate = 1 ether;
+    uint256 private _rate = ONE_ETHER;
 
     modifier onlyRouterCOA() {
         if (msg.sender != ROUTER_COA) revert NotRouterCOA();
         _;
     }
 
-    function _nextStakeRequestId(address user, uint256 nonce) private view returns (uint256 requestId) {
+    function _nextStakeRequestId(address user, uint256 nonce) private pure returns (uint256 requestId) {
         requestId = uint256(keccak256(abi.encode(STAKE_REQUEST_DOMAIN, user, nonce)));
     }
 
-    function _nextUnstakeRequestId(address user, uint256 nonce) private view returns (uint256 requestId) {
+    function _nextUnstakeRequestId(address user, uint256 nonce) private pure returns (uint256 requestId) {
         requestId = uint256(keccak256(abi.encode(UNSTAKE_REQUEST_DOMAIN, user, nonce)));
     }
 
     /// @notice FLOW (wei) implied by `sFlowWei` at the current `syncRate` (same convention as Cadence `flowPerSFlow`).
     function _flowFromSFlow(uint256 sFlowWei) private view returns (uint256) {
-        return (sFlowWei * _rate) / 1e18;
+        return (sFlowWei * _rate) / PRECISION;
     }
 
     /// @notice sFlow (wei) needed for `flowWei` at the current rate (inverse of `_flowFromSFlow`).
     function _sFlowFromFlow(uint256 flowWei) private view returns (uint256) {
-        return (flowWei * 1e18) / _rate;
+        return (flowWei * PRECISION) / _rate;
     }
 
     /// Deploy receipt to gain minter/burner rights.
@@ -107,9 +113,9 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         
         uint256 afterSlippagePercentage;
         unchecked {
-            afterSlippagePercentage = 1e18 - _config.slippageTolerance;
+            afterSlippagePercentage = PRECISION - _config.slippageTolerance;
         }
-        uint256 minAmountOut = expectedSFlow * afterSlippagePercentage / 1e18;
+        uint256 minAmountOut = expectedSFlow * afterSlippagePercentage / PRECISION;
 
         stakeRequests[requestId] = StakeRequest({
             status: RequestStatus.QUEUED,
