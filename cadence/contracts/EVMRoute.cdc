@@ -78,12 +78,22 @@ access(all) contract EVMRoute {
         return (intNano + fracNano) * outer
     }
 
-    /// Inverse of **`tokenUFix64ToScaledUInt256`** (truncates wei remainder).
+    /// Inverse of **`tokenUFix64ToScaledUInt256`** (truncates sub-1e-8-FLOW wei remainder).
+    ///
+    /// Decodes wei-style **`UInt256`** amounts by splitting whole FLOW and the 8-decimal
+    /// fractional lane instead of materializing **`scaled / 1e10`** as a single **`UInt64`**.
     access(all) view fun scaledUInt256ToTokenUFix64(_ scaled: UInt256): UFix64 {
-        let quantum: UInt256 = 10_000_000_000
-        let mantissa = scaled / quantum
-        assert(mantissa <= 18446744073709551615, message: "scaled token amount overflow")
-        return UFix64(UInt64(mantissa)) / 100_000_000.0
+        let weiFactor = UInt256(1_000_000_000_000_000_000)
+        let subNano = UInt256(10_000_000_000)
+
+        let whole = scaled / weiFactor
+        let rem = scaled % weiFactor
+        let frac8 = rem / subNano
+
+        assert(whole <= 18446744073709551615, message: "scaled token whole FLOW overflow")
+        assert(frac8 <= 18446744073709551615, message: "scaled token fractional overflow")
+
+        return UFix64(UInt64(whole)) + UFix64(UInt64(frac8)) / 100_000_000.0
     }
 
     /// Convert **`ratioScaled`** (approximately `trueRatio * ratioScaleFactor`) to **`UFix64`**.

@@ -31,6 +31,14 @@ fun testU256ToUIntAttoflowPreservesLargeWeiValues() {
 }
 
 access(all)
+fun testScaledUInt256ToTokenUFix64RoundTripLargeAmounts() {
+    let largeFlow: UFix64 = 500_000.0
+    let scaled = readTokenUFix64ToScaledUInt256(largeFlow)
+    let back = readScaledUInt256ToTokenUFix64(UInt256(scaled))
+    Test.assertEqual(largeFlow, back)
+}
+
+access(all)
 fun readUfix64FlowToAttoUInt(_ amount: UFix64): UInt {
     let r = Test.executeScript(
         "import \"EVMRoute\"\naccess(all) fun main(v: UFix64): UInt { return EVMRoute.ufix64FlowToAttoUInt(v) }\n",
@@ -58,4 +66,14 @@ fun readU256ToUIntAttoflow(_ wei: UInt): UInt {
     )
     Test.expect(r, Test.beSucceeded())
     return r.returnValue! as! UInt
+}
+
+access(all)
+fun readScaledUInt256ToTokenUFix64(_ scaled: UInt256): UFix64 {
+    let r = Test.executeScript(
+        "import \"EVMRoute\"\naccess(all) fun main(v: UInt256): UFix64 { return EVMRoute.scaledUInt256ToTokenUFix64(v) }\n",
+        [scaled]
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UFix64
 }
