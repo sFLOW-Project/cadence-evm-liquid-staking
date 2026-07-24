@@ -28,6 +28,7 @@ interface ILSPVault is ILSPVaultConfig {
         uint256 amount;
         // Minimum sFlow amount after stake
         uint256 minAmountOut;
+        uint256 timestamp;
     }
 
     struct UnstakeRequest {
@@ -38,6 +39,7 @@ interface ILSPVault is ILSPVaultConfig {
         // Flow amount
         uint256 flowAmount;
         uint256 unlockEpoch;
+        uint256 timestamp;
     }
 
     // Errors
@@ -52,6 +54,7 @@ interface ILSPVault is ILSPVaultConfig {
     error InvalidSFlowAddress();
     error InvalidRate();
     error NotRequestOwner();
+    error CantCancelRequestYet();
 
     // Events
     event StakeRequested(uint256 indexed id, address indexed user, uint256 amount);

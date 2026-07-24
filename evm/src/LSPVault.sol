@@ -22,6 +22,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     /// Constant for 18 decimals precision.
     uint256 public constant PRECISION = 1e18;
 
+    uint256 public constant CANCEL_REQUEST_TIMELOCK = 2 hours;
+
     /// Address of the router COA.
     address public immutable ROUTER_COA;
 
@@ -121,7 +123,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
             status: RequestStatus.QUEUED,
             user: msg.sender,
             amount: msg.value,
-            minAmountOut: minAmountOut
+            minAmountOut: minAmountOut,
+            timestamp: block.timestamp
         });
 
         FLOW_RECEIPT.mint(msg.sender, msg.value);
@@ -141,11 +144,13 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
      * @param _id id of the stake request.
      * @custom:throws InvalidRequest if the request is not queued.
      * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     * @custom:throws CantCancelRequestYet if the request is not old enough to cancel.
      */
     function cancelStakeRequest(uint256 _id) external {
         StakeRequest storage req = stakeRequests[_id];
         if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
         if (msg.sender != req.user) revert NotRequestOwner();
+        if (block.timestamp - req.timestamp < CANCEL_REQUEST_TIMELOCK) revert CantCancelRequestYet();
 
         req.status = RequestStatus.CANCELLED;
 
@@ -181,7 +186,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
             user: msg.sender,
             amount: _amount,
             flowAmount: 0,
-            unlockEpoch: 0
+            unlockEpoch: 0,
+            timestamp: block.timestamp
         });
 
         emit UnstakeRequested(requestId, msg.sender, _amount);
@@ -198,12 +204,14 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
      * @param _id id of the unstake request.
      * @custom:throws InvalidRequest if the request is not queued.
      * @custom:throws NotRequestOwner if the request is not owned by the caller.
+     * @custom:throws CantCancelRequestYet if the request is not old enough to cancel.
      */
     function cancelUnstakeRequest(uint256 _id) external {
         UnstakeRequest storage req = unstakeRequests[_id];
         // check if request is not already being processed
         if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
         if (msg.sender != req.user) revert NotRequestOwner();
+        if (block.timestamp - req.timestamp < CANCEL_REQUEST_TIMELOCK) revert CantCancelRequestYet();
 
         req.status = RequestStatus.CANCELLED;
 
