@@ -5,6 +5,9 @@ import "EVM"
 /// **`ratioScaleFactor`** and token/`UInt256` conversion helpers are the single source for Cadence ↔ EVM amount lanes
 /// and for **`LiquidStaking`** exchange-rate math (`flowPerSFlow`, mint/redeem).
 ///
+access(all) let STAKE_REQUEST_RETURNDATA_LENGTH = 160
+access(all) let UNSTAKE_REQUEST_RETURNDATA_LENGTH = 192
+
 access(all) contract EVMRoute {
 
     /// Fixed-point scale for ratio quotes (`≈ 1e18`), aligned with common Solidity integrations.
@@ -133,7 +136,7 @@ access(all) contract EVMRoute {
         )
         assert(res.status == EVM.Status.successful, message: "stakeRequests call failed")
         let d = res.data
-        assert(d.length >= 128, message: "short stakeRequests returndata")
+        assert(d.length >= STAKE_REQUEST_RETURNDATA_LENGTH, message: "short stakeRequests returndata")
         let status = d[31]
         let amount = self.abiWordUInt256(d, wordIndex: 2)
         let minAmountOut = self.abiWordUInt256(d, wordIndex: 3)
@@ -154,7 +157,7 @@ access(all) contract EVMRoute {
         )
         assert(res.status == EVM.Status.successful, message: "unstakeRequests call failed")
         let d = res.data
-        assert(d.length >= 96, message: "short unstakeRequests returndata")
+        assert(d.length >= UNSTAKE_REQUEST_RETURNDATA_LENGTH, message: "short unstakeRequests returndata")
         let status = d[31]
         let amount = self.abiWordUInt256(d, wordIndex: 2)
         return UnstakeRequestRead(status: status, amount: amount)
