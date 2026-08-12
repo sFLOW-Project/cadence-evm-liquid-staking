@@ -45,9 +45,9 @@ fun testMintIncrementsSupplyAndEmits() {
 
     Test.assertEqual(supplyBefore + 125.5, readSFlowTotalSupply())
 
-    let minted = Test.eventsOfType(Type<sFlowToken.TokensMinted>())
+    let minted = Test.eventsOfType(Type<sFlowToken.Minted>())
     Test.assertEqual(1, minted.length)
-    let mintedEvent = minted[0] as! sFlowToken.TokensMinted
+    let mintedEvent = minted[0] as! sFlowToken.Minted
     Test.assertEqual(125.5, mintedEvent.amount)
 
     let balance = readSFlowBalance(protocolAddress)
@@ -57,6 +57,7 @@ fun testMintIncrementsSupplyAndEmits() {
 access(all)
 fun testBurnDecrementsSupplyAndEmits() {
     let supplyBefore = readSFlowTotalSupply()
+    let balanceBefore = readSFlowBalance(protocolAddress)
 
     let txResult = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/burn_sflow.cdc"),
@@ -66,11 +67,38 @@ fun testBurnDecrementsSupplyAndEmits() {
     ))
     Test.expect(txResult, Test.beSucceeded())
 
-    Test.assertEqual(supplyBefore - 25.5, readSFlowTotalSupply())
+    let type = Type<FungibleToken.Burned>()
+    let events = Test.eventsOfType(type)
+    Test.assertEqual(1, events.length)
 
-    let burned = Test.eventsOfType(Type<sFlowToken.TokensBurned>())
-    let lastBurn = burned[burned.length - 1] as! sFlowToken.TokensBurned
-    Test.assertEqual(25.5, lastBurn.amount)
+    let tokensBurnedEvent = events[0] as! FungibleToken.Burned
+    Test.assertEqual(25.5, tokensBurnedEvent.amount)
+    Test.assertEqual("sFlowToken.Vault", tokensBurnedEvent.type)
+
+    Test.assertEqual(supplyBefore - 25.5, readSFlowTotalSupply())
+    Test.assertEqual(balanceBefore - 25.5, readSFlowBalance(protocolAddress))
+}
+
+access(all)
+fun testWithdrawEmitsFungibleTokenWithdrawn() {
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/mint_sflow_via_minter.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [10.0],
+    ))
+    Test.expect(txResult, Test.beSucceeded())
+
+    let withdrawTx = Test.executeTransaction(Test.Transaction(
+        code: "import \"FungibleToken\"\nimport \"sFlowToken\"\ntransaction(amount: UFix64) {\n    prepare(signer: auth(BorrowValue) &Account) {\n        let vault = signer.storage.borrow<auth(FungibleToken.Withdraw) &sFlowToken.Vault>(from: sFlowToken.tokenVaultPath) ?? panic(\"no vault\")\n        let withdrawn <- vault.withdraw(amount: amount)\n        destroy withdrawn\n    }\n}\n",
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [1.0],
+    ))
+    Test.expect(withdrawTx, Test.beSucceeded())
+
+    let withdrawn = Test.eventsOfType(Type<FungibleToken.Withdrawn>())
+    Test.assert(withdrawn.length > 0, message: "expected FungibleToken.Withdrawn")
 }
 
 access(all)

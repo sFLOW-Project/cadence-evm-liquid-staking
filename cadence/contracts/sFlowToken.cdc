@@ -17,17 +17,8 @@ access(all) contract sFlowToken: FungibleToken {
     access(all) let tokenReceiverPath: PublicPath
     access(all) let minterStoragePath: StoragePath
 
-    // Event that is emitted when tokens are withdrawn from a Vault
-    access(all) event TokensWithdrawn(amount: UFix64, from: Address?)
-
-    // Event that is emitted when tokens are deposited to a Vault
-    access(all) event TokensDeposited(amount: UFix64, to: Address?)
-
     // Event that is emitted when new tokens are minted
-    access(all) event TokensMinted(amount: UFix64)
-
-    // Event that is emitted when tokens are destroyed
-    access(all) event TokensBurned(amount: UFix64)
+    access(all) event Minted(amount: UFix64, type: String)
 
     // Vault
     //
@@ -53,7 +44,6 @@ access(all) contract sFlowToken: FungibleToken {
         /// Called when this sFlow vault is burned via the `Burner.burn()` method
         access(contract) fun burnCallback() {
             if self.balance > 0.0 {
-                emit TokensBurned(amount: self.balance)
                 sFlowToken.totalSupply = sFlowToken.totalSupply - self.balance
             }
             self.balance = 0.0
@@ -92,7 +82,6 @@ access(all) contract sFlowToken: FungibleToken {
         // elsewhere.
         access(FungibleToken.Withdraw) fun withdraw(amount: UFix64): @{FungibleToken.Vault} {
             self.balance = self.balance - amount
-            emit TokensWithdrawn(amount: amount, from: self.owner?.address)
             return <-create Vault(balance: amount)
         }
 
@@ -106,7 +95,6 @@ access(all) contract sFlowToken: FungibleToken {
         access(all) fun deposit(from: @{FungibleToken.Vault}) {
             let vault <- from as! @sFlowToken.Vault
             self.balance = self.balance + vault.balance
-            emit TokensDeposited(amount: vault.balance, to: self.owner?.address)
             vault.balance = 0.0
             destroy vault
         }
@@ -178,8 +166,9 @@ access(all) contract sFlowToken: FungibleToken {
             amount > 0.0: "Mint amount \(amount) must be > 0"
         }
         sFlowToken.totalSupply = sFlowToken.totalSupply + amount
-        emit TokensMinted(amount: amount)
-        return <-create Vault(balance: amount)
+        let vault <-create Vault(balance: amount)
+        emit Minted(amount: amount, type: vault.getType().identifier)
+        return <-vault
     }
 
     access(all) resource Minter {
