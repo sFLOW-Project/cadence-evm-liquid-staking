@@ -125,7 +125,7 @@ access(all) contract EVMRoute {
         id: UInt256
     ): StakeRequestRead {
         let calldata = EVM.encodeABIWithSignature("stakeRequests(uint256)", [id])
-        let res = coa.call(
+        let res = coa.dryCall(
             to: vault,
             data: calldata,
             gasLimit: self.gasLimitViewRequest,
@@ -146,7 +146,7 @@ access(all) contract EVMRoute {
         id: UInt256
     ): UnstakeRequestRead {
         let calldata = EVM.encodeABIWithSignature("unstakeRequests(uint256)", [id])
-        let res = coa.call(
+        let res = coa.dryCall(
             to: vault,
             data: calldata,
             gasLimit: self.gasLimitViewRequest,
