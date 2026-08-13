@@ -431,6 +431,54 @@ fun testWithdrawStuckReceiptIgnoresAdminDelay() {
 }
 
 access(all)
+fun testWithdrawStuckReceiptRestoresUnwithdrawnToTotalFlowStaked() {
+    let unstakeSFlow: UFix64 = 5.0
+    let expectedFlow = readCalcFlowFromSFlow(unstakeSFlow)
+    let stakedAfterUnstakeExpected = readTotalFlowStaked() - expectedFlow
+    let userFlowBefore = readFlowBalance(userAccount.address)
+
+    let unstakeTx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [unstakeSFlow],
+    ))
+    Test.expect(unstakeTx, Test.beSucceeded())
+    Test.assertEqual(stakedAfterUnstakeExpected, readTotalFlowStaked())
+
+    let uuid = receiptUuidAt(userAccount.address, index: 0)
+    let receiptFlow = receiptAmountAt(userAccount.address, index: 0)
+    Test.assertEqual(expectedFlow, receiptFlow)
+
+    // Unlock epoch reached, but only part of the unstaking bucket matures.
+    advanceEpochCounter(2)
+    let withdrawAmount: UFix64 = 2.0
+    Test.assert(withdrawAmount < receiptFlow, message: "fixture must leave an unwithdrawn remainder")
+    matureUnstakingAmount(withdrawAmount)
+
+    let buckets = readDelegatorBuckets()
+    Test.assertEqual(withdrawAmount, buckets[3])
+
+    let stuckWithdraw = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_withdraw_stuck.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [uuid],
+    ))
+    Test.expect(stuckWithdraw, Test.beSucceeded())
+
+    let unwithdrawn = receiptFlow - withdrawAmount
+    Test.assertEqual(userFlowBefore + withdrawAmount, readFlowBalance(userAccount.address))
+    Test.assertEqual(stakedAfterUnstakeExpected + unwithdrawn, readTotalFlowStaked())
+    Test.assertEqual(0, readReceipts(userAccount.address).length)
+
+    let fulfilled = Test.eventsOfType(Type<LiquidStaking.UnstakeFulfilled>())
+    let last = fulfilled[fulfilled.length - 1] as! LiquidStaking.UnstakeFulfilled
+    Test.assertEqual(uuid, last.id)
+    Test.assertEqual(withdrawAmount, last.flowAmount)
+}
+
+access(all)
 fun testUnstakeRevertsWhenFlowEquivalentBelowMinWithRateAboveOne() {
     Test.assert(readFlowPerSFlow() > 1.0, message: "compound must have raised FLOW per sFlow")
     let sFlowAmount: UFix64 = 0.6
@@ -636,6 +684,28 @@ fun advanceEpoch(_ n: UInt64) {
     Test.expect(tx, Test.beSucceeded())
 }
 
+access(all)
+fun advanceEpochCounter(_ n: UInt64) {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/advance_epoch_counter.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [n],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
+access(all)
+fun matureUnstakingAmount(_ amount: UFix64) {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/mature_unstaking_amount.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [mockNodeID, 1 as UInt32, amount],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
 // ---- read-only helpers (always via script so we get fresh contract state) ----
 
 access(all)
@@ -666,6 +736,16 @@ fun readTotalFlowStaked(): UFix64 {
     )
     Test.expect(r, Test.beSucceeded())
     return r.returnValue! as! UFix64
+}
+
+access(all)
+fun readDelegatorBuckets(): [UFix64] {
+    let r = Test.executeScript(
+        Test.readFile("../../cadence/test/helpers/get_delegator_info.cdc"),
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! [UFix64]
 }
 
 access(all)

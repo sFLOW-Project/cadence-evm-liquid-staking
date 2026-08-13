@@ -120,6 +120,7 @@ access(all) contract LiquidStaking {
     /// Differs from `withdraw`:
     ///   - Honors base `receipt.unlockEpoch` only (ignores retroactive `unstakeUnlockEpochDelay`).
     ///   - Pulls `min(receipt.amount, tokensUnstaked)` when the delegator bucket is short.
+    ///   - Credits `receipt.amount - withdrawAmount` back to `totalFlowStaked`
     access(account) fun withdrawStuckReceipt(receipt: @FlowReceipt): @FlowToken.Vault {
         pre {
             FlowEpoch.currentEpochCounter >= receipt.unlockEpoch:
@@ -149,6 +150,8 @@ access(all) contract LiquidStaking {
         emit UnstakeFulfilled(id: receipt.uuid, flowAmount: withdrawAmount)
 
         let flowVault <- delegator.withdrawUnstakedTokens(amount: withdrawAmount) as! @FlowToken.Vault
+
+        self.totalFlowStaked = self.totalFlowStaked + (receipt.amount - withdrawAmount)
 
         destroy receipt
 

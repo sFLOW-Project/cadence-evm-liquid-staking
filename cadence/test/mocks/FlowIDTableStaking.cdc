@@ -66,11 +66,15 @@ access(all) contract FlowIDTableStaking {
         }
 
         access(contract) fun matureUnstaking(): UFix64 {
-            let amount = self.unstaking
+            return self.matureUnstakingAmount(self.unstaking)
+        }
+
+        access(contract) fun matureUnstakingAmount(_ amount: UFix64): UFix64 {
             if amount == 0.0 {
                 return 0.0
             }
-            self.unstaking = 0.0
+            assert(amount <= self.unstaking, message: "Insufficient unstaking balance to mature")
+            self.unstaking = self.unstaking - amount
             self.unstaked = self.unstaked + amount
             return amount
         }
@@ -223,6 +227,17 @@ access(all) contract FlowIDTableStaking {
         let amount = bucket.matureUnstaking()
         if amount > 0.0 {
             emit UnstakingMatured(nodeID: nodeID, delegatorID: delegatorID, amount: amount)
+        }
+    }
+
+    /// Move `amount` of one delegator's `unstaking` balance into `unstaked`. Used to
+    /// simulate a short unstaked bucket for `withdrawStuckReceipt` recovery tests.
+    access(all) fun matureUnstakingAmount(nodeID: String, delegatorID: UInt32, amount: UFix64) {
+        let key = self.bucketKey(nodeID: nodeID, delegatorID: delegatorID)
+        let bucket = self.borrowBucket(key: key) ?? panic("delegator not found")
+        let matured = bucket.matureUnstakingAmount(amount)
+        if matured > 0.0 {
+            emit UnstakingMatured(nodeID: nodeID, delegatorID: delegatorID, amount: matured)
         }
     }
 
