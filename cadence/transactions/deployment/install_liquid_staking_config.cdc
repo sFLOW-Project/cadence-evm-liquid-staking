@@ -12,10 +12,13 @@ import "EVMRoute"
 ///   - `code` ............... contents of `cadence/contracts/LiquidStakingConfig.cdc` (String)
 ///   - `protocolFeePercent` .. initial fee ratio (UFix64), `<= 0.2`
 ///   - `protocolFeeReceiver`. Cadence Address that receives the FLOW protocol fee
-///   - `minOperationAmount`.. minimum FLOW per stake/unstake on Cadence (`> 0.0`)
+///   - `minOperationAmount`.. minimum FLOW per stake/unstake on Cadence (`> 0.0`). Must equal
+///                             the vault constructor `_minRequestAmount` (same FLOW amount);
+///                             init dry-calls `getConfig()` and reverts on mismatch.
 ///   - `unstakeUnlockEpochDelay` .. extra epochs added to receipt unlock (`<= 2`)
-///   - `lspVaultEvmHex` ..... hex address (with `0x`-prefix tolerated) of the Solidity LSPVault
-///                             whose owner is the governance COA created here
+///   - `lspVaultEvmHex` ..... hex address (with `0x`-prefix tolerated) of the Solidity LSPVault.
+///                             Vault `isStakingPaused` must be `false` (Cadence always starts unpaused).
+///                             Ownership transfer to this governance COA is a later tx.
 ///
 /// Re-running this against an account that already has `LiquidStakingConfig` will fail; use
 /// `update_contract.cdc` instead for upgrades (note: contract init does not re-run on update,

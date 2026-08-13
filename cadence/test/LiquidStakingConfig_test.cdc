@@ -16,8 +16,8 @@ import "LiquidStakingConfig"
 ///   * identical Admin surface for `registerDelegator`, `setProtocolFeeReceiver`,
 ///     `setUnstakeUnlockEpochDelay`, `setStakingPaused`, `setMinOperationAmount`,
 ///     `setProtocolFee` (queue) and `activateProtocolFee` (activation)
-/// All EVM-mirror calls (`EVMRoute.set*`) and EVM getters
-/// (`lspVaultEVMAddress`, `governanceCoaEVMAddress`) are documented as
+/// All EVM-mirror calls (`EVMRoute.set*`), init-time vault `getConfig()` checks,
+/// and EVM getters (`lspVaultEVMAddress`, `governanceCoaEVMAddress`) are documented as
 /// integration-test scope and are not exercised here.
 
 access(all) let protocolAddress: Address = 0x0000000000000007

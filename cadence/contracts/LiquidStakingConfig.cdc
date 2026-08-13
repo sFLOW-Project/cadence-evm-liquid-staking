@@ -24,9 +24,9 @@ access(all) contract LiquidStakingConfig {
     /// Protocol fee taken from each epoch's rewards (e.g. `0.1` = 10%).
     access(all) var protocolFeePercent: UFix64
 
-    /// When true, **`LiquidStaking.stake`** is rejected (mirror EVM `isStakingPaused` via admin txs).
+    /// When true, **`LiquidStaking.stake`** is rejected. Must match EVM `isStakingPaused` at init and via `setStakingPaused`.
     access(all) var isStakingPaused: Bool
-    /// Minimum FLOW per stake/unstake on Cadence (align with EVM `minRequestAmount` via admin sync tx).
+    /// Minimum FLOW per stake/unstake. Must match EVM `minRequestAmount` at init and via `setMinOperationAmount`.
     access(all) var minOperationAmount: UFix64
 
     /// Added to **`FlowEpoch.currentEpochCounter`** at unstake to set unlock epoch (admin; max 2).
@@ -55,6 +55,22 @@ access(all) contract LiquidStakingConfig {
         init(coa: @EVM.CadenceOwnedAccount, vault: EVM.EVMAddress) {
             self.coa <- coa
             self.vault = vault
+            // Vault owner is still the router COA; require getConfig() min/pause to match
+            // rather than calling setters. protocolFee is not compared (vault defaults to 0).
+            self.assertEvmSettingsMatchCadence()
+        }
+
+        access(self) fun assertEvmSettingsMatchCadence() {
+            let cfg = EVMRoute.readVaultConfig(coa: self.borrowCoa(), vault: self.vault)
+            let expectedMin = EVMRoute.tokenUFix64ToScaledUInt256(LiquidStakingConfig.minOperationAmount)
+            assert(
+                cfg.minRequestAmount == expectedMin,
+                message: "LSPVault minRequestAmount \(cfg.minRequestAmount) != Cadence minOperationAmount scaled \(expectedMin)"
+            )
+            assert(
+                cfg.isStakingPaused == LiquidStakingConfig.isStakingPaused,
+                message: "LSPVault isStakingPaused does not match Cadence isStakingPaused"
+            )
         }
 
         access(all) fun registerDelegator(nodeID: String, from: @FlowToken.Vault) {

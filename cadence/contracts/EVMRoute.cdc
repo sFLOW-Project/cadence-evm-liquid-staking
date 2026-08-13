@@ -46,6 +46,25 @@ access(all) contract EVMRoute {
         }
     }
 
+    /// ABI-decoded `LSPVault.getConfig()` / `ILSPVaultConfig.Config`.
+    access(all) struct VaultConfigRead {
+        access(all) let minRequestAmount: UInt256
+        access(all) let isStakingPaused: Bool
+        access(all) let protocolFee: UInt256
+        access(all) let slippageTolerance: UInt256
+        init(
+            minRequestAmount: UInt256,
+            isStakingPaused: Bool,
+            protocolFee: UInt256,
+            slippageTolerance: UInt256
+        ) {
+            self.minRequestAmount = minRequestAmount
+            self.isStakingPaused = isStakingPaused
+            self.protocolFee = protocolFee
+            self.slippageTolerance = slippageTolerance
+        }
+    }
+
     access(all) fun evmAddress(hex: String): EVM.EVMAddress {
         return EVM.addressFromString(hex)
     }
@@ -148,6 +167,31 @@ access(all) contract EVMRoute {
         let amount = self.abiWordUInt256(d, wordIndex: 2)
         let minAmountOut = self.abiWordUInt256(d, wordIndex: 3)
         return StakeRequestRead(status: status, amount: amount, minAmountOut: minAmountOut)
+    }
+
+    access(all) fun readVaultConfig(
+        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        vault: EVM.EVMAddress
+    ): VaultConfigRead {
+        let CONFIG_RETURNDATA_LENGTH = 128
+        let calldata = EVM.encodeABIWithSignature("getConfig()", [])
+        let res = coa.dryCall(
+            to: vault,
+            data: calldata,
+            gasLimit: self.gasLimitViewRequest,
+            value: EVM.Balance(attoflow: 0)
+        )
+        assert(res.status == EVM.Status.successful, message: "getConfig call failed")
+        let d = res.data
+        assert(d.length >= CONFIG_RETURNDATA_LENGTH, message: "short getConfig returndata")
+        let pausedWord = self.abiWordUInt256(d, wordIndex: 1)
+        assert(pausedWord <= 1, message: "getConfig: invalid isStakingPaused encoding")
+        return VaultConfigRead(
+            minRequestAmount: self.abiWordUInt256(d, wordIndex: 0),
+            isStakingPaused: pausedWord == 1,
+            protocolFee: self.abiWordUInt256(d, wordIndex: 2),
+            slippageTolerance: self.abiWordUInt256(d, wordIndex: 3)
+        )
     }
 
     access(all) fun readUnstakeRequest(

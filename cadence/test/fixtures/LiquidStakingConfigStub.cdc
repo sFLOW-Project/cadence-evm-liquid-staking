@@ -20,7 +20,8 @@ import "FlowIDTableStaking"
 ///     `setUnstakeUnlockEpochDelay`)
 ///
 /// EVM mirror calls (`EVMRoute.setProtocolFee`, `setStakingPaused`,
-/// `setMinRequestAmount`, `setSlippageTolerance`) and the EVM getters
+/// `setMinRequestAmount`, `setSlippageTolerance`), init-time `getConfig()`
+/// validation of vault min/pause, and the EVM getters
 /// (`lspVaultEVMAddress`, `governanceCoaEVMAddress`) are explicitly **dropped**
 /// because the test runtime doesn't provision an `LSPVault` on the EVM side.
 /// All other behavior (events, preconditions, timelock window) matches the
