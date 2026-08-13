@@ -5,8 +5,6 @@ import "EVM"
 /// **`ratioScaleFactor`** and token/`UInt256` conversion helpers are the single source for Cadence ↔ EVM amount lanes
 /// and for **`LiquidStaking`** exchange-rate math (`flowPerSFlow`, mint/redeem).
 ///
-access(all) let STAKE_REQUEST_RETURNDATA_LENGTH = 160
-access(all) let UNSTAKE_REQUEST_RETURNDATA_LENGTH = 192
 
 access(all) contract EVMRoute {
 
@@ -86,6 +84,7 @@ access(all) contract EVMRoute {
     /// Decodes wei-style **`UInt256`** amounts by splitting whole FLOW and the 8-decimal
     /// fractional lane instead of materializing **`scaled / 1e10`** as a single **`UInt64`**.
     access(all) view fun scaledUInt256ToTokenUFix64(_ scaled: UInt256): UFix64 {
+        let MAX_FRACTIONAL_PART: UInt256 = 9551615
         let weiFactor = UInt256(1_000_000_000_000_000_000)
         let subNano = UInt256(10_000_000_000)
 
@@ -93,8 +92,10 @@ access(all) contract EVMRoute {
         let rem = scaled % weiFactor
         let frac8 = rem / subNano
 
-        assert(whole <= 18446744073709551615, message: "scaled token whole FLOW overflow")
-        assert(frac8 <= 18446744073709551615, message: "scaled token fractional overflow")
+        assert(
+            whole < UInt256(UFix64.max) || (whole == UInt256(UFix64.max) && frac8 <= MAX_FRACTIONAL_PART),
+            message: "scaled token exceeds UFix64.max"
+        )
 
         return UFix64(UInt64(whole)) + UFix64(UInt64(frac8)) / 100_000_000.0
     }
@@ -102,11 +103,16 @@ access(all) contract EVMRoute {
     /// Convert **`ratioScaled`** (approximately `trueRatio * ratioScaleFactor`) to **`UFix64`**.
     access(all) view fun ratioScaled1e18ToUFix64(_ ratioScaled: UInt256): UFix64 {
         let scale = self.ratioScaleFactor
+        let MAX_FRACTIONAL_PART: UInt256 = 9551615
         let whole = ratioScaled / scale
         let rem = ratioScaled % scale
-        assert(whole <= 18446744073709551615, message: "ratio whole overflow")
         let frac8 = rem * 100_000_000 / scale
-        assert(frac8 <= 18446744073709551615, message: "ratio fractional overflow")
+
+        assert(
+            whole < UInt256(UFix64.max) || (whole == UInt256(UFix64.max) && frac8 <= MAX_FRACTIONAL_PART),
+            message: "ratioScaled exceeds UFix64.max"
+        )
+
         return UFix64(UInt64(whole)) + UFix64(UInt64(frac8)) / 100_000_000.0
     }
 
@@ -127,6 +133,7 @@ access(all) contract EVMRoute {
         vault: EVM.EVMAddress,
         id: UInt256
     ): StakeRequestRead {
+        let STAKE_REQUEST_RETURNDATA_LENGTH = 160
         let calldata = EVM.encodeABIWithSignature("stakeRequests(uint256)", [id])
         let res = coa.dryCall(
             to: vault,
@@ -148,6 +155,7 @@ access(all) contract EVMRoute {
         vault: EVM.EVMAddress,
         id: UInt256
     ): UnstakeRequestRead {
+        let UNSTAKE_REQUEST_RETURNDATA_LENGTH = 192
         let calldata = EVM.encodeABIWithSignature("unstakeRequests(uint256)", [id])
         let res = coa.dryCall(
             to: vault,
