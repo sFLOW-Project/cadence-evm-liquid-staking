@@ -11,7 +11,9 @@ interface ILSPVaultConfig {
 
     error SlippageToleranceTooHigh(uint256 maxSlippageTolerance, uint256 slippageTolerance);
     error ProtocolFeeTooHigh(uint256 maxProtocolFee, uint256 protocolFee);
-    
+    error MinRequestAmountMustBePositive();
+    error MinRequestAmountNotCadenceRepresentable(uint256 minRequestAmount);
+
     function getConfig() external view returns (Config memory);
     function updateConfig(Config calldata _config) external;
     function setMinRequestAmount(uint256 _minRequestAmount) external;

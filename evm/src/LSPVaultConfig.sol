@@ -10,7 +10,12 @@ abstract contract LSPVaultConfig is Ownable, ILSPVaultConfig {
     uint256 private constant MAX_SLIPPAGE_TOLERANCE = 1e16; // 1%
     uint256 private constant MAX_PROTOCOL_FEE = 2e17; // 20%
 
-    constructor(address _owner) Ownable(_owner) {
+    /// Wei per Cadence `UFix64` ulp (EVM 18 decimals − Cadence 8 decimals).
+    uint256 public constant CADENCE_DECIMAL_SCALE = 1e10;
+
+    constructor(address _owner, uint256 _minRequestAmount) Ownable(_owner) {
+        _validateMinRequestAmount(_minRequestAmount);
+        _config.minRequestAmount = _minRequestAmount;
         _config.slippageTolerance = MAX_SLIPPAGE_TOLERANCE;
     }
 
@@ -25,13 +30,30 @@ abstract contract LSPVaultConfig is Ownable, ILSPVaultConfig {
         if (_newConfig.protocolFee > MAX_PROTOCOL_FEE) {
             revert ProtocolFeeTooHigh(MAX_PROTOCOL_FEE, _newConfig.protocolFee);
         }
+        if (_newConfig.minRequestAmount == 0) revert MinRequestAmountMustBePositive();
+        if (_newConfig.minRequestAmount % CADENCE_DECIMAL_SCALE != 0) {
+            revert MinRequestAmountNotCadenceRepresentable(_newConfig.minRequestAmount);
+        }
+        _validateMinRequestAmount(_newConfig.minRequestAmount);
         emit ConfigUpdated(_config, _newConfig);
         _config = _newConfig;
     }
 
     function setMinRequestAmount(uint256 _minRequestAmount) external onlyOwner {
+        if (_minRequestAmount == 0) revert MinRequestAmountMustBePositive();
+        if (_minRequestAmount % CADENCE_DECIMAL_SCALE != 0) {
+            revert MinRequestAmountNotCadenceRepresentable(_minRequestAmount);
+        }
         emit MinRequestAmountUpdated(_config.minRequestAmount, _minRequestAmount);
         _config.minRequestAmount = _minRequestAmount;
+    }
+
+    /// Cadence `UFix64` is 8 decimals; reject 0 and sub-1e-8 wei dust.
+    function _validateMinRequestAmount(uint256 _minRequestAmount) private pure {
+        if (_minRequestAmount == 0) revert MinRequestAmountMustBePositive();
+        if (_minRequestAmount % CADENCE_DECIMAL_SCALE != 0) {
+            revert MinRequestAmountNotCadenceRepresentable(_minRequestAmount);
+        }
     }
 
     function setIsStakingPaused(bool _isStakingPaused) external onlyOwner {

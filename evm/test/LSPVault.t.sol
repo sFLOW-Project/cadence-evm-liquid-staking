@@ -17,11 +17,13 @@ contract LSPVaultTest is Test {
     address public routerCOA = address(0x2);
     address public staker = address(0x3);
 
+    uint256 internal constant MIN_REQUEST_AMOUNT = 0.01 ether;
+
     function setUp() public {
         sFlow = new MockERC20();
         // for simplicity used admin coa to deploy vault
         vm.prank(adminCOA);
-        lspVault = new LSPVault(address(sFlow), routerCOA);
+        lspVault = new LSPVault(address(sFlow), routerCOA, MIN_REQUEST_AMOUNT);
         flowReceipt = FlowReceipt(lspVault.FLOW_RECEIPT());
 
         vm.deal(adminCOA, 10_000 ether);
@@ -30,7 +32,9 @@ contract LSPVaultTest is Test {
 
         vm.prank(adminCOA);
         lspVault.updateConfig(
-            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16})
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+            })
         );
 
         vm.prank(routerCOA);
@@ -52,7 +56,9 @@ contract LSPVaultTest is Test {
     function testRequestStakeRevertsIfStakingIsPaused() public {
         vm.prank(adminCOA);
         lspVault.updateConfig(
-            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16})
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16
+            })
         );
         vm.prank(staker);
         vm.expectRevert(ILSPVault.StakingPaused.selector);
@@ -386,7 +392,9 @@ contract LSPVaultTest is Test {
     function testUpdateConfig() public {
         vm.prank(adminCOA);
         lspVault.updateConfig(
-            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16})
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16
+            })
         );
         assertEq(lspVault.getConfig().isStakingPaused, true);
         assertEq(lspVault.getConfig().protocolFee, 0);
@@ -396,7 +404,9 @@ contract LSPVaultTest is Test {
     function testUpdateConfig_acceptsMaxProtocolFee() public {
         vm.prank(adminCOA);
         lspVault.updateConfig(
-            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17, slippageTolerance: 1e16})
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17, slippageTolerance: 1e16
+            })
         );
         assertEq(lspVault.getConfig().protocolFee, 2e17);
     }
@@ -405,7 +415,9 @@ contract LSPVaultTest is Test {
         vm.prank(adminCOA);
         vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.ProtocolFeeTooHigh.selector, 2e17, 2e17 + 1));
         lspVault.updateConfig(
-            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17 + 1, slippageTolerance: 1e16})
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17 + 1, slippageTolerance: 1e16
+            })
         );
     }
 
@@ -415,6 +427,76 @@ contract LSPVaultTest is Test {
         emit ILSPVaultConfig.MinRequestAmountUpdated(0.01 ether, 0.02 ether);
         lspVault.setMinRequestAmount(0.02 ether);
         assertEq(lspVault.getConfig().minRequestAmount, 0.02 ether);
+    }
+
+    function testMinRequestAmountInitializedOnDeploy_stakeEnforcesItImmediately() public {
+        vm.prank(adminCOA);
+        LSPVault freshVault = new LSPVault(address(sFlow), routerCOA, MIN_REQUEST_AMOUNT);
+
+        assertEq(freshVault.getConfig().minRequestAmount, MIN_REQUEST_AMOUNT);
+
+        vm.prank(routerCOA);
+        freshVault.syncRate(1 ether);
+
+        vm.prank(staker);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILSPVault.OperationAmountTooLow.selector, MIN_REQUEST_AMOUNT, 0.009 ether)
+        );
+        freshVault.requestStake{value: 0.009 ether}();
+    }
+
+    function testConstructor_revertsIfMinRequestAmountIsZero() public {
+        vm.prank(adminCOA);
+        vm.expectRevert(ILSPVaultConfig.MinRequestAmountMustBePositive.selector);
+        new LSPVault(address(sFlow), routerCOA, 0);
+    }
+
+    function testConstructor_revertsIfMinRequestAmountNotCadenceRepresentable() public {
+        uint256 dusty = MIN_REQUEST_AMOUNT + 1;
+        vm.prank(adminCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.MinRequestAmountNotCadenceRepresentable.selector, dusty));
+        new LSPVault(address(sFlow), routerCOA, dusty);
+    }
+
+    function testConstructor_acceptsSmallestCadenceUlp() public {
+        uint256 smallest = 1e10;
+        vm.prank(adminCOA);
+        LSPVault freshVault = new LSPVault(address(sFlow), routerCOA, smallest);
+        assertEq(freshVault.getConfig().minRequestAmount, smallest);
+    }
+
+    function testSetMinRequestAmount_revertsIfZero() public {
+        vm.prank(adminCOA);
+        vm.expectRevert(ILSPVaultConfig.MinRequestAmountMustBePositive.selector);
+        lspVault.setMinRequestAmount(0);
+    }
+
+    function testSetMinRequestAmount_revertsIfNotCadenceRepresentable() public {
+        uint256 dusty = MIN_REQUEST_AMOUNT + 1;
+        vm.prank(adminCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.MinRequestAmountNotCadenceRepresentable.selector, dusty));
+        lspVault.setMinRequestAmount(dusty);
+    }
+
+    function testUpdateConfig_revertsIfMinRequestAmountIsZero() public {
+        vm.prank(adminCOA);
+        vm.expectRevert(ILSPVaultConfig.MinRequestAmountMustBePositive.selector);
+        lspVault.updateConfig(
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+            })
+        );
+    }
+
+    function testUpdateConfig_revertsIfMinRequestAmountNotCadenceRepresentable() public {
+        uint256 dusty = MIN_REQUEST_AMOUNT + 1;
+        vm.prank(adminCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.MinRequestAmountNotCadenceRepresentable.selector, dusty));
+        lspVault.updateConfig(
+            ILSPVaultConfig.Config({
+                minRequestAmount: dusty, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+            })
+        );
     }
 
     function testSetIsStakingPaused() public {
@@ -474,12 +556,10 @@ contract LSPVaultTest is Test {
     /// Constructor sets 1% slippage; stake enforces it without an explicit `updateConfig` / `setSlippageTolerance`.
     function testSlippageToleranceInitializedOnDeploy_stakeUsesItImmediately() public {
         vm.prank(adminCOA);
-        LSPVault freshVault = new LSPVault(address(sFlow), routerCOA);
+        LSPVault freshVault = new LSPVault(address(sFlow), routerCOA, MIN_REQUEST_AMOUNT);
 
         assertEq(freshVault.getConfig().slippageTolerance, 1e16, "default slippage after deploy");
-
-        vm.prank(adminCOA);
-        freshVault.setMinRequestAmount(0.01 ether);
+        assertEq(freshVault.getConfig().minRequestAmount, MIN_REQUEST_AMOUNT, "min set atomically on deploy");
 
         vm.prank(routerCOA);
         freshVault.syncRate(1 ether);
@@ -491,7 +571,7 @@ contract LSPVaultTest is Test {
         vm.prank(routerCOA);
         freshVault.withdrawPendingStakeNative(reqId);
 
-        (, , , uint256 minAmountOut,) = freshVault.stakeRequests(reqId);
+        (,,, uint256 minAmountOut,) = freshVault.stakeRequests(reqId);
         assertEq(minAmountOut, stakeAmount * (1e18 - 1e16) / 1e18, "minAmountOut from default slippage");
 
         sFlow.mint(address(freshVault), minAmountOut);
@@ -538,7 +618,9 @@ contract LSPVaultTest is Test {
         vm.prank(staker);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, staker));
         lspVault.updateConfig(
-            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16})
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16
+            })
         );
     }
 
@@ -665,7 +747,7 @@ contract LSPVaultTest is Test {
         vm.prank(routerCOA);
         lspVault.withdrawPendingStakeNative(reqId);
 
-        (, , , uint256 minAmountOut,) = lspVault.stakeRequests(reqId);
+        (,,, uint256 minAmountOut,) = lspVault.stakeRequests(reqId);
 
         vm.prank(routerCOA);
         vm.expectRevert(abi.encodeWithSelector(ILSPVault.sFlowAmountTooLow.selector, minAmountOut, minAmountOut - 1));
@@ -714,7 +796,7 @@ contract LSPVaultTest is Test {
         bytes32 baseSlot = keccak256(abi.encode(reqId, uint256(5)));
         vm.store(address(lspVault), bytes32(uint256(baseSlot) + 1), bytes32(0));
 
-        (, , uint256 amount,,) = lspVault.stakeRequests(reqId);
+        (,, uint256 amount,,) = lspVault.stakeRequests(reqId);
         assertEq(amount, 0);
 
         vm.prank(routerCOA);
@@ -729,11 +811,13 @@ contract LSPVaultTest is Test {
         RevertingEthReceiver badRouter = new RevertingEthReceiver();
 
         vm.prank(adminCOA);
-        LSPVault v = new LSPVault(address(sFlow), address(badRouter));
+        LSPVault v = new LSPVault(address(sFlow), address(badRouter), MIN_REQUEST_AMOUNT);
 
         vm.prank(adminCOA);
         v.updateConfig(
-            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16})
+            ILSPVaultConfig.Config({
+                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+            })
         );
 
         vm.prank(address(badRouter));

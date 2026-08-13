@@ -3,16 +3,17 @@ import "EVM"
 /// Deploys **`LSPVault`** bytecode from the router COA saved at **`/storage/lspRelayerRouterCOA`**.
 ///
 /// **`bytecode`** must be the **full creation bytecode** your Solidity toolchain emits for **`LSPVault`**, already
-/// concatenated with ABI-encoded constructor arguments **`(address _sFlowAddress, address _routerCOA)`** where:
+/// concatenated with ABI-encoded constructor arguments **`(address _sFlowAddress, address _routerCOA, uint256 _minRequestAmount)`** where:
 ///   - **`_sFlowAddress`** is the bridged sFlow ERC-20 on Flow EVM (same hex later passed to **`install_relayer_router.cdc`**).
 ///   - **`_routerCOA`** equals the router COA's EVM address (see **`cadence/scripts/admin/get_router_coa_evm_address.cdc`**).
+///   - **`_minRequestAmount`** is the FLOW wei floor for stake/unstake (`> 0`, multiple of `1e10` so it is an exact Cadence `UFix64` ulp).
 ///
 /// Locally (Foundry):
 ///
 /// ```bash
 /// ROUTER=$(flow scripts execute cadence/scripts/admin/get_router_coa_evm_address.cdc ... )
 /// BYTECODE=$(jq -r '.deployedBytecode.object' evm/out/LSPVault.sol/LSPVault.json)
-/// ARGS=$(cast abi-encode "constructor(address,address)" "$SFLOW_HEX" "$ROUTER")
+/// ARGS=$(cast abi-encode "constructor(address,address,uint256)" "$SFLOW_HEX" "$ROUTER" "$MIN_REQUEST_WEI")
 /// INIT=$(cast concat-hex "$BYTECODE" "$ARGS")
 /// ```
 ///

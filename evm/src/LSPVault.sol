@@ -82,7 +82,10 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     }
 
     /// Deploy receipt to gain minter/burner rights.
-    constructor(address _sFlowAddress, address _routerCOA) LSPVaultConfig(msg.sender) {
+    /// @param _minRequestAmount FLOW wei floor for stake/unstake; must be > 0 and a Cadence `UFix64` ulp (multiple of 1e10).
+    constructor(address _sFlowAddress, address _routerCOA, uint256 _minRequestAmount)
+        LSPVaultConfig(msg.sender, _minRequestAmount)
+    {
         if (_routerCOA == address(0)) revert InvalidRouterCOA();
         if (_sFlowAddress == address(0)) revert InvalidSFlowAddress();
         ROUTER_COA = _routerCOA;
@@ -352,7 +355,6 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     function withdrawPendingUnstakeSFlow(uint256 _id) external onlyRouterCOA returns (uint256) {
         UnstakeRequest storage req = unstakeRequests[_id];
         if (req.status != RequestStatus.QUEUED) revert InvalidRequest();
-
 
         req.status = RequestStatus.AWAITING_FULFILLMENT;
 

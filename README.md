@@ -187,7 +187,7 @@ Run these **from the protocol Cadence account** in order:
 
 4. **`cadence/transactions/deployment/create_router_coa.cdc`** — creates the **router COA**, saves it at **`/storage/lspRelayerRouterCOA`**, publishes **`/public/lspRouterCOAEvmAddr`**.
 
-5. **`flow scripts execute cadence/scripts/admin/get_router_coa_evm_address.cdc`** — pass the protocol **`Address`**; use the returned **`0x…`** hex when encoding **`LSPVault`** **`constructor(address _sFlowAddress, address _routerCOA)`** off-chain (e.g. Foundry **`forge inspect`** bytecode + **`cast abi-encode`** + **`cast concat-hex`**).
+5. **`flow scripts execute cadence/scripts/admin/get_router_coa_evm_address.cdc`** — pass the protocol **`Address`**; use the returned **`0x…`** hex when encoding **`LSPVault`** **`constructor(address _sFlowAddress, address _routerCOA, uint256 _minRequestAmount)`** off-chain (e.g. Foundry **`forge inspect`** bytecode + **`cast abi-encode`** + **`cast concat-hex`**). **`_minRequestAmount`** is FLOW wei (`> 0`, multiple of `1e10`).
 
 6. **`cadence/transactions/deployment/fund_router_coa_flow.cdc`** — seed the router COA with FLOW for Flow EVM gas on **`deploy`** / **`call`**.
 

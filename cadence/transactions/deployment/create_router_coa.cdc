@@ -6,7 +6,7 @@ import "EVM"
 ///
 /// Stored at **`/storage/lspRelayerRouterCOA`**. A public **`&{EVM.Addressable}`** capability is published at
 /// **`/public/lspRouterCOAEvmAddr`** so **`cadence/scripts/admin/get_router_coa_evm_address.cdc`** can read the EVM hex
-/// when ABI-encoding the Solidity constructor `(address _sFlowAddress, address _routerCOA)`.
+/// when ABI-encoding the Solidity constructor `(address _sFlowAddress, address _routerCOA, uint256 _minRequestAmount)`.
 ///
 /// Run exactly once before **`deploy_lsp_vault_evm.cdc`**.
 transaction {
