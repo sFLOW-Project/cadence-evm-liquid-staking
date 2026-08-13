@@ -115,7 +115,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         uint256 requestId = _nextStakeRequestId(msg.sender, nonce);
 
         uint256 expectedSFlow = _sFlowFromFlow(msg.value);
-        
+
         uint256 afterSlippagePercentage;
         unchecked {
             afterSlippagePercentage = PRECISION - _config.slippageTolerance;

@@ -70,7 +70,9 @@ abstract contract LSPVaultConfig is Ownable, ILSPVaultConfig {
     }
 
     function setSlippageTolerance(uint256 _slippageTolerance) external onlyOwner {
-        if (_slippageTolerance > MAX_SLIPPAGE_TOLERANCE) revert SlippageToleranceTooHigh(MAX_SLIPPAGE_TOLERANCE, _slippageTolerance);
+        if (_slippageTolerance > MAX_SLIPPAGE_TOLERANCE) {
+            revert SlippageToleranceTooHigh(MAX_SLIPPAGE_TOLERANCE, _slippageTolerance);
+        }
         emit SlippageToleranceUpdated(_config.slippageTolerance, _slippageTolerance);
         _config.slippageTolerance = _slippageTolerance;
     }
