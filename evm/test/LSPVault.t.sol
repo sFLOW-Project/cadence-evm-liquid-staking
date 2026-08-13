@@ -393,6 +393,22 @@ contract LSPVaultTest is Test {
         assertEq(lspVault.getConfig().minRequestAmount, 0.01 ether);
     }
 
+    function testUpdateConfig_acceptsMaxProtocolFee() public {
+        vm.prank(adminCOA);
+        lspVault.updateConfig(
+            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17, slippageTolerance: 1e16})
+        );
+        assertEq(lspVault.getConfig().protocolFee, 2e17);
+    }
+
+    function testUpdateConfig_revertsIfProtocolFeeExceedsMax() public {
+        vm.prank(adminCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.ProtocolFeeTooHigh.selector, 2e17, 2e17 + 1));
+        lspVault.updateConfig(
+            ILSPVaultConfig.Config({minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17 + 1, slippageTolerance: 1e16})
+        );
+    }
+
     function testSetMinRequestAmount() public {
         vm.prank(adminCOA);
         vm.expectEmit(true, true, false, true);
@@ -415,6 +431,20 @@ contract LSPVaultTest is Test {
         emit ILSPVaultConfig.ProtocolFeeUpdated(0, 0.01 ether);
         lspVault.setProtocolFee(0.01 ether);
         assertEq(lspVault.getConfig().protocolFee, 0.01 ether);
+    }
+
+    function testSetProtocolFee_acceptsMaxTwentyPercent() public {
+        vm.prank(adminCOA);
+        vm.expectEmit(true, true, false, true);
+        emit ILSPVaultConfig.ProtocolFeeUpdated(0, 2e17);
+        lspVault.setProtocolFee(2e17);
+        assertEq(lspVault.getConfig().protocolFee, 2e17);
+    }
+
+    function testSetProtocolFee_revertsIfExceedsMax() public {
+        vm.prank(adminCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.ProtocolFeeTooHigh.selector, 2e17, 2e17 + 1));
+        lspVault.setProtocolFee(2e17 + 1);
     }
 
     function testSetSlippageTolerance() public {

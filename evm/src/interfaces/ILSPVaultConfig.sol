@@ -10,6 +10,7 @@ interface ILSPVaultConfig {
     }
 
     error SlippageToleranceTooHigh(uint256 maxSlippageTolerance, uint256 slippageTolerance);
+    error ProtocolFeeTooHigh(uint256 maxProtocolFee, uint256 protocolFee);
     
     function getConfig() external view returns (Config memory);
     function updateConfig(Config calldata _config) external;
