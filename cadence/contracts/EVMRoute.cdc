@@ -426,14 +426,14 @@ access(all) contract EVMRoute {
         vault: EVM.EVMAddress,
         paused: Bool
     ) {
-        let data = EVM.encodeABIWithSignature("setStakingPaused(bool)", [paused])
+        let data = EVM.encodeABIWithSignature("setIsStakingPaused(bool)", [paused])
         let res = coa.call(
             to: vault,
             data: data,
             gasLimit: self.gasLimitAdminSetter,
             value: EVM.Balance(attoflow: 0)
         )
-        assert(res.status == EVM.Status.successful, message: "setStakingPaused call failed")
+        assert(res.status == EVM.Status.successful, message: "setIsStakingPaused call failed")
     }
 
     access(account) fun setMinRequestAmount(
