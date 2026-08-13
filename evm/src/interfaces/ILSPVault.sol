@@ -44,6 +44,8 @@ interface ILSPVault is ILSPVaultConfig {
 
     // Errors
     error OperationAmountTooLow(uint256 minAmount, uint256 amount);
+    /// Amount is not an exact Cadence `UFix64` ulp (must be a multiple of `1e10` wei).
+    error AmountNotCadenceRepresentable(uint256 amount);
     error StakingPaused();
     error InvalidRequest();
     error NativeTransferFailed();

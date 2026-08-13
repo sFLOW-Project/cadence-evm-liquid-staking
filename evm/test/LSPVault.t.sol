@@ -71,6 +71,23 @@ contract LSPVaultTest is Test {
         lspVault.requestStake{value: 0.009 ether}();
     }
 
+    function testRequestStakeRevertsIfAmountNotCadenceRepresentable() public {
+        uint256 dusty = MIN_REQUEST_AMOUNT + 1;
+        vm.prank(staker);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.AmountNotCadenceRepresentable.selector, dusty));
+        lspVault.requestStake{value: dusty}();
+    }
+
+    function testRequestUnstakeRevertsIfAmountNotCadenceRepresentable() public {
+        uint256 dusty = MIN_REQUEST_AMOUNT + 1;
+        sFlow.mint(staker, dusty);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), dusty);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.AmountNotCadenceRepresentable.selector, dusty));
+        lspVault.requestUnstake(dusty);
+        vm.stopPrank();
+    }
+
     function testRequestUnstakeRevertsIfAmountIsLessThanMinRequestAmount() public {
         sFlow.mint(staker, 0.005 ether);
         vm.startPrank(staker);

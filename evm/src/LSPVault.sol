@@ -81,6 +81,11 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         return (flowWei * PRECISION) / _rate;
     }
 
+    /// Cadence FLOW / sFLOW vaults are `UFix64` (8 decimals). EVM wei has 18; the lower 10 digits cannot be represented.
+    function _requireCadenceRepresentable(uint256 amount) private pure {
+        if (amount % CADENCE_DECIMAL_SCALE != 0) revert AmountNotCadenceRepresentable(amount);
+    }
+
     /// Deploy receipt to gain minter/burner rights.
     /// @param _minRequestAmount FLOW wei floor for stake/unstake; must be > 0 and a Cadence `UFix64` ulp (multiple of 1e10).
     constructor(address _sFlowAddress, address _routerCOA, uint256 _minRequestAmount)
@@ -105,11 +110,13 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     /**
      * Requests a stake of Flow to the LSP on cadence. Mints receipts tokens to the user.
      * @custom:throws StakingPaused if the staking is paused.
-     * @custom:throws MinAmountStakeAmountTooLowNotMet if the amount is less than the minimum stake amount.
+     * @custom:throws OperationAmountTooLow if the amount is less than the minimum stake amount.
+     * @custom:throws AmountNotCadenceRepresentable if `msg.value` is not a multiple of `CADENCE_DECIMAL_SCALE` (1e10).
      */
     function requestStake() external payable returns (uint256) {
         if (_config.isStakingPaused) revert StakingPaused();
         if (msg.value < _config.minRequestAmount) revert OperationAmountTooLow(_config.minRequestAmount, msg.value);
+        _requireCadenceRepresentable(msg.value);
 
         uint256 nonce = stakeRequestCount[msg.sender];
         uint256 requestId = _nextStakeRequestId(msg.sender, nonce);
@@ -168,13 +175,15 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
      * Requests an unstake of sFlow. Locks sFlow in the vault for the keeper to bridge
      * to Cadence and process through the LSP.
      * @param _amount amount of sFlow to unstake.
-     * @custom:throws MinAmountNotMet if the FLOW equivalent of `_amount` is below `minRequestAmount` (same FLOW floor as `requestStake`).
+     * @custom:throws OperationAmountTooLow if the FLOW equivalent of `_amount` is below `minRequestAmount` (same FLOW floor as `requestStake`).
+     * @custom:throws AmountNotCadenceRepresentable if `_amount` is not a multiple of `CADENCE_DECIMAL_SCALE` (1e10).
      */
     function requestUnstake(uint256 _amount) external returns (uint256) {
         uint256 flowEquivalent = _flowFromSFlow(_amount);
         if (flowEquivalent < _config.minRequestAmount) {
             revert OperationAmountTooLow(_config.minRequestAmount, flowEquivalent);
         }
+        _requireCadenceRepresentable(_amount);
 
         IERC20(S_FLOW_ADDRESS).safeTransferFrom(msg.sender, address(this), _amount);
 
