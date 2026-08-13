@@ -139,11 +139,39 @@ access(all) contract LiquidStakingConfig {
         }
 
         access(all) fun setSlippageTolerance(slippageTolerance: UFix64) {
+            pre { slippageTolerance <= 0.01: "Slippage tolerance \(slippageTolerance) cannot exceed 1% (0.01)" }
             EVMRoute.setSlippageTolerance(
                 coa: self.borrowCoa(),
                 vault: self.vault,
                 slippageTolerance: EVMRoute.tokenUFix64ToScaledUInt256(slippageTolerance)
             )
+        }
+
+        /// Atomically update Cadence min/pause and push the full EVM `Config`.
+        /// `protocolFee` on the vault is the current Cadence `protocolFeePercent`
+        /// (fee changes still go through `setProtocolFee` / `activateProtocolFee`).
+        access(all) fun updateConfig(
+            minOperationAmount: UFix64,
+            paused: Bool,
+            slippageTolerance: UFix64
+        ) {
+            pre {
+                minOperationAmount > 0.0: "Minimum operation amount \(minOperationAmount) must be > 0"
+                slippageTolerance <= 0.01: "Slippage tolerance \(slippageTolerance) cannot exceed 1% (0.01)"
+            }
+            let oldMin = LiquidStakingConfig.minOperationAmount
+            LiquidStakingConfig.minOperationAmount = minOperationAmount
+            LiquidStakingConfig.isStakingPaused = paused
+            EVMRoute.updateConfig(
+                coa: self.borrowCoa(),
+                vault: self.vault,
+                minRequestAmount: EVMRoute.tokenUFix64ToScaledUInt256(minOperationAmount),
+                isStakingPaused: paused,
+                protocolFee: EVMRoute.tokenUFix64ToScaledUInt256(LiquidStakingConfig.protocolFeePercent),
+                slippageTolerance: EVMRoute.tokenUFix64ToScaledUInt256(slippageTolerance)
+            )
+            emit MinStakeUpdated(oldMin: oldMin, newMin: minOperationAmount)
+            emit StakingPauseUpdated(paused: paused)
         }
 
         /// Used by **`setup_phase3.cdc`** (EVM snapshot / vault reads).

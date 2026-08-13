@@ -15,7 +15,8 @@ import "LiquidStakingConfig"
 ///   * identical event signatures + storage paths
 ///   * identical Admin surface for `registerDelegator`, `setProtocolFeeReceiver`,
 ///     `setUnstakeUnlockEpochDelay`, `setStakingPaused`, `setMinOperationAmount`,
-///     `setProtocolFee` (queue) and `activateProtocolFee` (activation)
+///     `setSlippageTolerance`, `updateConfig`, `setProtocolFee` (queue) and
+///     `activateProtocolFee` (activation)
 /// All EVM-mirror calls (`EVMRoute.set*`), init-time vault `getConfig()` checks,
 /// and EVM getters (`lspVaultEVMAddress`, `governanceCoaEVMAddress`) are documented as
 /// integration-test scope and are not exercised here.
@@ -214,6 +215,64 @@ fun testAdminSetMinOperationAmountZeroRejected() {
         authorizers: [protocolAddress],
         signers: [protocolAccount],
         arguments: [0.0],
+    ))
+    Test.expect(txResult, Test.beFailed())
+}
+
+// ---- admin: setSlippageTolerance / updateConfig ----
+
+access(all)
+fun testAdminSetSlippageToleranceTooHighRejected() {
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/transactions/admin/set_slippage_tolerance.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [0.01000001],
+    ))
+    Test.expect(txResult, Test.beFailed())
+}
+
+access(all)
+fun testAdminUpdateConfigUpdatesMinAndPause() {
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/update_config.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [2.5, true, 0.005],
+    ))
+    Test.expect(txResult, Test.beSucceeded())
+    Test.assertEqual(2.5, readConfigSnapshot()[5] as! UFix64)
+    Test.assertEqual(true, readConfigSnapshot()[4] as! Bool)
+
+    let revert = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/update_config.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [1.0, false, 0.01],
+    ))
+    Test.expect(revert, Test.beSucceeded())
+    Test.assertEqual(1.0, readConfigSnapshot()[5] as! UFix64)
+    Test.assertEqual(false, readConfigSnapshot()[4] as! Bool)
+}
+
+access(all)
+fun testAdminUpdateConfigZeroMinRejected() {
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/update_config.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [0.0, false, 0.01],
+    ))
+    Test.expect(txResult, Test.beFailed())
+}
+
+access(all)
+fun testAdminUpdateConfigSlippageTooHighRejected() {
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/update_config.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [1.0, false, 0.01000001],
     ))
     Test.expect(txResult, Test.beFailed())
 }

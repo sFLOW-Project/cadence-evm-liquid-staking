@@ -17,7 +17,7 @@ import "FlowIDTableStaking"
 ///   - The fee-queue / activate / setter surface on `Admin`
 ///     (`registerDelegator`, `setProtocolFee`, `activateProtocolFee`,
 ///     `setStakingPaused`, `setMinOperationAmount`, `setProtocolFeeReceiver`,
-///     `setUnstakeUnlockEpochDelay`)
+///     `setUnstakeUnlockEpochDelay`, `setSlippageTolerance`, `updateConfig`)
 ///
 /// EVM mirror calls (`EVMRoute.setProtocolFee`, `setStakingPaused`,
 /// `setMinRequestAmount`, `setSlippageTolerance`), init-time `getConfig()`
@@ -115,6 +115,26 @@ access(all) contract LiquidStakingConfig {
             let old = LiquidStakingConfig.unstakeUnlockEpochDelay
             LiquidStakingConfig.unstakeUnlockEpochDelay = newDelay
             emit UnstakeUnlockEpochDelayUpdated(oldDelayEpochs: old, newDelayEpochs: newDelay)
+        }
+
+        access(all) fun setSlippageTolerance(slippageTolerance: UFix64) {
+            pre { slippageTolerance <= 0.01: "Slippage tolerance cannot exceed 1%" }
+        }
+
+        access(all) fun updateConfig(
+            minOperationAmount: UFix64,
+            paused: Bool,
+            slippageTolerance: UFix64
+        ) {
+            pre {
+                minOperationAmount > 0.0: "Minimum operation amount must be greater than 0"
+                slippageTolerance <= 0.01: "Slippage tolerance cannot exceed 1%"
+            }
+            let old = LiquidStakingConfig.minOperationAmount
+            LiquidStakingConfig.minOperationAmount = minOperationAmount
+            LiquidStakingConfig.isStakingPaused = paused
+            emit MinStakeUpdated(oldMin: old, newMin: minOperationAmount)
+            emit StakingPauseUpdated(paused: paused)
         }
     }
 

@@ -448,9 +448,19 @@ access(all) contract EVMRoute {
         vault: EVM.EVMAddress,
         minRequestAmount: UInt256,
         isStakingPaused: Bool,
-        protocolFee: UInt256
+        protocolFee: UInt256,
+        slippageTolerance: UInt256
     ) {
-        let data = EVM.encodeABIWithSignature("updateConfig(uint256,bool,uint256)", [minRequestAmount, isStakingPaused, protocolFee])
+        let cfg = VaultConfigRead(
+            minRequestAmount: minRequestAmount,
+            isStakingPaused: isStakingPaused,
+            protocolFee: protocolFee,
+            slippageTolerance: slippageTolerance
+        )
+        let data = EVM.encodeABIWithSignature(
+            "updateConfig((uint256,bool,uint256,uint256))",
+            [cfg]
+        )
         let res = coa.call(
             to: vault,
             data: data,
