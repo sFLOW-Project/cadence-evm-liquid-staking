@@ -177,6 +177,7 @@ fun testStakeAtMinOperationAmountSucceeds() {
 access(all)
 fun testUnstakeRevertsBelowMinOperationAmount() {
     let belowMin: UFix64 = 0.99999999
+    let flowEquivalent = readCalcFlowFromSFlow(belowMin)
     let txResult = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
         authorizers: [userAccount.address],
@@ -185,8 +186,12 @@ fun testUnstakeRevertsBelowMinOperationAmount() {
     ))
     Test.expect(txResult, Test.beFailed())
     Test.assert(
-        errorIncludes(txResult.error?.message, substring: "0.99999999"),
-        message: "unstake precondition should include attempted amount"
+        errorIncludes(txResult.error?.message, substring: "\(flowEquivalent)"),
+        message: "unstake should report FLOW equivalent, not sFLOW amount"
+    )
+    Test.assert(
+        errorIncludes(txResult.error?.message, substring: "1.00000000"),
+        message: "unstake should include configured FLOW minimum"
     )
 }
 
@@ -423,6 +428,49 @@ fun testWithdrawStuckReceiptIgnoresAdminDelay() {
     Test.expect(stuckWithdraw, Test.beSucceeded())
 
     setUnstakeDelay(0)
+}
+
+access(all)
+fun testUnstakeRevertsWhenFlowEquivalentBelowMinWithRateAboveOne() {
+    Test.assert(readFlowPerSFlow() > 1.0, message: "compound must have raised FLOW per sFlow")
+    let sFlowAmount: UFix64 = 0.6
+    Test.assert(sFlowAmount < 1.0, message: "fixture sFLOW is below the 1.0 FLOW min")
+    let flowEquivalent = readCalcFlowFromSFlow(sFlowAmount)
+    Test.assert(flowEquivalent < 1.0, message: "FLOW redeemable must also be below min")
+
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [sFlowAmount],
+    ))
+    Test.expect(txResult, Test.beFailed())
+    Test.assert(
+        errorIncludes(txResult.error?.message, substring: "\(flowEquivalent)"),
+        message: "unstake should report FLOW equivalent \(flowEquivalent)"
+    )
+}
+
+access(all)
+fun testUnstakeSucceedsWhenSFlowBelowMinButFlowEquivalentMeetsMin() {
+    Test.assert(readFlowPerSFlow() > 1.0, message: "compound must have raised FLOW per sFlow")
+    let sFlowAmount: UFix64 = 0.7
+    Test.assert(sFlowAmount < 1.0, message: "sFLOW amount is below the 1.0 FLOW min")
+    let flowEquivalent = readCalcFlowFromSFlow(sFlowAmount)
+    Test.assert(flowEquivalent >= 1.0, message: "FLOW redeemable must meet the min")
+
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [sFlowAmount],
+    ))
+    Test.expect(txResult, Test.beSucceeded())
+
+    let unstakeEvents = Test.eventsOfType(Type<LiquidStaking.UnstakeRequested>())
+    let last = unstakeEvents[unstakeEvents.length - 1] as! LiquidStaking.UnstakeRequested
+    Test.assertEqual(sFlowAmount, last.sFlowAmount)
+    Test.assertEqual(flowEquivalent, last.flowAmount)
 }
 
 // =========================================================================

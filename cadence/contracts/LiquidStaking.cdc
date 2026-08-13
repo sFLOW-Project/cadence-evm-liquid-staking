@@ -66,12 +66,14 @@ access(all) contract LiquidStaking {
     access(all) fun unstake(from: @sFlowToken.Vault): @FlowReceipt {
         pre {
             FlowIDTableStaking.stakingEnabled() == true: "Not in the Flow chain staking period"
-            from.balance >= LiquidStakingConfig.minOperationAmount:
-                "Unstake amount \(from.balance) must be >= min \(LiquidStakingConfig.minOperationAmount)"
         }
 
         let sFlowAmount = from.balance
         let flowAmount = self.calcFlowFromSFlow(sFlowAmount: sFlowAmount)
+        assert(
+            flowAmount >= LiquidStakingConfig.minOperationAmount,
+            message: "Unstake FLOW amount \(flowAmount) must be >= min \(LiquidStakingConfig.minOperationAmount)"
+        )
 
         sFlowToken.burnTokens(from: <-from)
 
