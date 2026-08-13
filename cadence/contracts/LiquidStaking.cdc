@@ -120,7 +120,9 @@ access(all) contract LiquidStaking {
     /// Differs from `withdraw`:
     ///   - Honors base `receipt.unlockEpoch` only (ignores retroactive `unstakeUnlockEpochDelay`).
     ///   - Pulls `min(receipt.amount, tokensUnstaked)` when the delegator bucket is short.
-    ///   - Credits `receipt.amount - withdrawAmount` back to `totalFlowStaked`
+    ///   - Credits `receipt.amount - withdrawAmount` back to `totalFlowStaked`.
+    /// The returned vault balance is the amount EVM must credit (`fulfillUnstakeRequestPartial`
+    /// when it is less than `receipt.amount`). The Cadence receipt is always destroyed.
     access(account) fun withdrawStuckReceipt(receipt: @FlowReceipt): @FlowToken.Vault {
         pre {
             FlowEpoch.currentEpochCounter >= receipt.unlockEpoch:

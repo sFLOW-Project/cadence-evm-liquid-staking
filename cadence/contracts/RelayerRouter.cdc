@@ -203,23 +203,17 @@ access(all) contract RelayerRouter {
 
         let receiptOpt <- self.evmRequestIdToReceipt.remove(key: unstakeRequestId)
         let receipt <- receiptOpt ?? panic("No stored receipt for unstake request \(unstakeRequestId)")
-        
-        let receiptAmount = EVMRoute.ufix64FlowToWeiUInt256(receipt.amount)
 
         let flowVault <- LiquidStaking.withdraw(receipt: <-receipt)
+        let flowReturnedWei = EVMRoute.ufix64FlowToWeiUInt256(flowVault.balance)
 
         coa.deposit(from: <-flowVault)
-
-        EVMRoute.sendNativeValue(
-            coa: coa,
-            to: vaultAddr,
-            attoflowAmount: UInt(receiptAmount)
-        )
 
         EVMRoute.fulfillUnstakeRequest(
             coa: coa,
             vault: vaultAddr,
-            id: unstakeRequestId
+            id: unstakeRequestId,
+            attoflowAmount: UInt(flowReturnedWei)
         )
 
         let finalizedStatus = EVMRoute.readUnstakeRequest(coa: coa, vault: vaultAddr, id: unstakeRequestId).status
@@ -232,6 +226,8 @@ access(all) contract RelayerRouter {
     /// Admin escape hatch when a stored receipt cannot be cleared via permissionless finalization.
     /// Uses `LiquidStaking.withdrawStuckReceipt`, which ignores retroactive unlock delay and
     /// withdraws up to available unstaked FLOW when the delegator bucket is short.
+    /// EVM is credited with the FLOW actually returned (`fulfillUnstakeRequestPartial`
+    /// when that is less than the Cadence receipt), never the original confirmed amount.
     access(all) fun evictStuckReceipt(
         unstakeRequestId: UInt256,
         admin: &LiquidStakingConfig.Admin
@@ -259,20 +255,28 @@ access(all) contract RelayerRouter {
         let flowVault <- LiquidStaking.withdrawStuckReceipt(receipt: <-receipt)
         let flowReturned = flowVault.balance
         let flowReturnedWei = EVMRoute.ufix64FlowToWeiUInt256(flowReturned)
+        assert(
+            flowReturned <= flowAmount,
+            message: "Stuck receipt returned more FLOW (\(flowReturned)) than receipt.amount (\(flowAmount))"
+        )
 
         coa.deposit(from: <-flowVault)
 
-        EVMRoute.sendNativeValue(
-            coa: coa,
-            to: vaultAddr,
-            attoflowAmount: UInt(flowReturnedWei)
-        )
-
-        EVMRoute.fulfillUnstakeRequest(
-            coa: coa,
-            vault: vaultAddr,
-            id: unstakeRequestId
-        )
+        if flowReturned < flowAmount {
+            EVMRoute.fulfillUnstakeRequestPartial(
+                coa: coa,
+                vault: vaultAddr,
+                id: unstakeRequestId,
+                attoflowAmount: UInt(flowReturnedWei)
+            )
+        } else {
+            EVMRoute.fulfillUnstakeRequest(
+                coa: coa,
+                vault: vaultAddr,
+                id: unstakeRequestId,
+                attoflowAmount: UInt(flowReturnedWei)
+            )
+        }
 
         let evictedStatus = EVMRoute.readUnstakeRequest(coa: coa, vault: vaultAddr, id: unstakeRequestId).status
         assert(

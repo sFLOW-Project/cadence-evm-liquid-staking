@@ -352,7 +352,8 @@ access(all) contract EVMRoute {
     access(all) fun fulfillUnstakeRequest(
         coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
-        id: UInt256
+        id: UInt256,
+        attoflowAmount: UInt
     ) {
         let fdata = EVM.encodeABIWithSignature(
             "fulfillUnstakeRequest(uint256)",
@@ -362,9 +363,30 @@ access(all) contract EVMRoute {
             to: vault,
             data: fdata,
             gasLimit: self.gasLimitFulfillUnstake,
-            value: EVM.Balance(attoflow: 0)
+            value: EVM.Balance(attoflow: attoflowAmount)
         )
         assert(res.status == EVM.Status.successful, message: "fulfillUnstakeRequest failed")
+    }
+
+    /// Recovery fulfill when Cadence returned less FLOW than `req.flowAmount`.
+    /// Credits `attoflowAmount` on EVM (`LSPVault.fulfillUnstakeRequestPartial`).
+    access(all) fun fulfillUnstakeRequestPartial(
+        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        vault: EVM.EVMAddress,
+        id: UInt256,
+        attoflowAmount: UInt
+    ) {
+        let fdata = EVM.encodeABIWithSignature(
+            "fulfillUnstakeRequestPartial(uint256)",
+            [id]
+        )
+        let res = coa.call(
+            to: vault,
+            data: fdata,
+            gasLimit: self.gasLimitFulfillUnstake,
+            value: EVM.Balance(attoflow: attoflowAmount)
+        )
+        assert(res.status == EVM.Status.successful, message: "fulfillUnstakeRequestPartial failed")
     }
 
     init() {
@@ -379,7 +401,7 @@ access(all) contract EVMRoute {
         self.gasLimitWithdrawPendingUnstake = 300_000
         self.gasLimitConfirmUnstake = 500_000
         self.gasLimitSendNative = 100_000
-        self.gasLimitFulfillUnstake = 500_000
+        self.gasLimitFulfillUnstake = 600_000
         self.gasLimitAdminSetter = 100_000
         self.gasLimitUpdateConfig = 200_000
     }

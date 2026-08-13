@@ -114,7 +114,7 @@ contract LSPVaultTest is Test {
     function testFulfillUnstakeRequestRevertsIfRequestIsNotPending() public {
         vm.prank(routerCOA);
         vm.expectRevert(ILSPVault.InvalidRequest.selector);
-        lspVault.fulfillUnstakeRequest(1);
+        lspVault.fulfillUnstakeRequest{value: 0}(1);
     }
 
     function testRequestStake() public {
@@ -377,11 +377,10 @@ contract LSPVaultTest is Test {
         vm.prank(routerCOA);
         lspVault.confirmUnstakeRequest(reqId, 100 ether, 1);
 
-        // COA deposits FLOW into vault, then fulfills; user pulls via claimPendingWithdrawal
-        vm.deal(address(lspVault), 100 ether);
+        // COA sends FLOW with fulfill; user pulls via claimPendingWithdrawal
         uint256 balBefore = staker.balance;
         vm.prank(routerCOA);
-        lspVault.fulfillUnstakeRequest(reqId);
+        lspVault.fulfillUnstakeRequest{value: 100 ether}(reqId);
 
         vm.prank(staker);
         lspVault.claimPendingWithdrawal();
@@ -652,7 +651,7 @@ contract LSPVaultTest is Test {
         lspVault.confirmUnstakeRequest(1, 100 ether, 1);
     }
 
-    function testFulfillUnstakeRevertsIfLowBalance() public {
+    function testFulfillUnstakeRequest_revertsIfValueDoesNotMatchConfirmed() public {
         sFlow.mint(staker, 100 ether);
         vm.startPrank(staker);
         sFlow.approve(address(lspVault), 100 ether);
@@ -667,14 +666,9 @@ contract LSPVaultTest is Test {
         vm.prank(routerCOA);
         lspVault.confirmUnstakeRequest(reqId, 100 ether, 1);
 
-        // fulfillUnstakeRequest only credits pendingWithdrawals; claim needs sufficient vault balance
-        vm.deal(address(lspVault), 99 ether);
         vm.prank(routerCOA);
-        lspVault.fulfillUnstakeRequest(reqId);
-
-        vm.prank(staker);
-        vm.expectRevert(abi.encodeWithSelector(ILSPVault.NativeTransferFailed.selector));
-        lspVault.claimPendingWithdrawal();
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.UnstakeFulfillmentAmountInvalid.selector, 100 ether, 99 ether));
+        lspVault.fulfillUnstakeRequest{value: 99 ether}(reqId);
     }
 
     function testClaimPendingWithdrawal_revertsIfNothingPending() public {
@@ -939,13 +933,10 @@ contract LSPVaultTest is Test {
         vm.prank(routerCOA);
         lspVault.confirmUnstakeRequest(reqId, 100 ether, 1);
 
-        // Step 2: simulate epoch — keeper sends FLOW back to vault after Cadence processes.
-        vm.deal(address(lspVault), 100 ether);
-
-        // Step 3: keeper fulfills — user claims FLOW.
+        // Step 2: keeper fulfills with the FLOW returned from Cadence.
         uint256 userBefore = staker.balance;
         vm.prank(routerCOA);
-        lspVault.fulfillUnstakeRequest(reqId);
+        lspVault.fulfillUnstakeRequest{value: 100 ether}(reqId);
 
         vm.prank(staker);
         lspVault.claimPendingWithdrawal();
@@ -981,10 +972,9 @@ contract LSPVaultTest is Test {
         uint256 reqId = lspVault.requestUnstake(50 ether);
         vm.stopPrank();
 
-        vm.deal(address(lspVault), 50 ether);
         vm.prank(routerCOA);
         vm.expectRevert(ILSPVault.InvalidRequest.selector);
-        lspVault.fulfillUnstakeRequest(reqId);
+        lspVault.fulfillUnstakeRequest{value: 50 ether}(reqId);
     }
 
     /// fulfillUnstakeRequest must reject a FULFILLED request (no double-pay).
@@ -1000,12 +990,11 @@ contract LSPVaultTest is Test {
         vm.prank(routerCOA);
         lspVault.confirmUnstakeRequest(reqId, 50 ether, 1);
 
-        vm.deal(address(lspVault), 100 ether);
         vm.startPrank(routerCOA);
-        lspVault.fulfillUnstakeRequest(reqId);
+        lspVault.fulfillUnstakeRequest{value: 50 ether}(reqId);
 
         vm.expectRevert(ILSPVault.InvalidRequest.selector);
-        lspVault.fulfillUnstakeRequest(reqId);
+        lspVault.fulfillUnstakeRequest{value: 50 ether}(reqId);
         vm.stopPrank();
     }
 
@@ -1033,15 +1022,12 @@ contract LSPVaultTest is Test {
         lspVault.confirmUnstakeRequest(reqId2, 40 ether, 1);
         vm.stopPrank();
 
-        // Simulate epoch: vault receives 100 FLOW total.
-        vm.deal(address(lspVault), 100 ether);
-
         uint256 bal1Before = staker.balance;
         uint256 bal2Before = staker2.balance;
 
         vm.startPrank(routerCOA);
-        lspVault.fulfillUnstakeRequest(reqId1);
-        lspVault.fulfillUnstakeRequest(reqId2);
+        lspVault.fulfillUnstakeRequest{value: 60 ether}(reqId1);
+        lspVault.fulfillUnstakeRequest{value: 40 ether}(reqId2);
         vm.stopPrank();
 
         vm.prank(staker);
@@ -1052,6 +1038,93 @@ contract LSPVaultTest is Test {
         assertEq(staker.balance, bal1Before + 60 ether);
         assertEq(staker2.balance, bal2Before + 40 ether);
         assertEq(address(lspVault).balance, 0);
+    }
+
+    function testFulfillUnstakeRequestPartial_creditsReturnedAmount() public {
+        sFlow.mint(staker, 100 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 100 ether);
+        uint256 reqId = lspVault.requestUnstake(100 ether);
+        vm.stopPrank();
+
+        vm.prank(routerCOA);
+        lspVault.withdrawPendingUnstakeSFlow(reqId);
+        vm.prank(routerCOA);
+        lspVault.confirmUnstakeRequest(reqId, 100 ether, 1);
+
+        uint256 returned = 40 ether;
+        vm.expectEmit(true, true, false, true);
+        emit ILSPVault.UnstakeFulfilled(reqId, staker, returned);
+
+        vm.prank(routerCOA);
+        lspVault.fulfillUnstakeRequestPartial{value: returned}(reqId);
+
+        assertEq(lspVault.pendingWithdrawals(staker), returned);
+        assertEq(flowReceipt.balanceOf(staker), 0);
+        assertEq(address(lspVault).balance, returned);
+
+        (ILSPVault.RequestStatus status,,, uint256 flowAmount,,) = lspVault.unstakeRequests(reqId);
+        assertEq(uint256(status), uint256(ILSPVault.RequestStatus.FULFILLED));
+        assertEq(flowAmount, returned);
+
+        uint256 userBefore = staker.balance;
+        vm.prank(staker);
+        lspVault.claimPendingWithdrawal();
+        assertEq(staker.balance, userBefore + returned);
+        assertEq(address(lspVault).balance, 0);
+    }
+
+    function testFulfillUnstakeRequestPartial_revertsIfZeroOrAboveConfirmed() public {
+        sFlow.mint(staker, 50 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 50 ether);
+        uint256 reqId = lspVault.requestUnstake(50 ether);
+        vm.stopPrank();
+
+        vm.prank(routerCOA);
+        lspVault.withdrawPendingUnstakeSFlow(reqId);
+        vm.prank(routerCOA);
+        lspVault.confirmUnstakeRequest(reqId, 50 ether, 1);
+
+        vm.prank(routerCOA);
+        vm.expectRevert(abi.encodeWithSelector(ILSPVault.UnstakeFulfillmentAmountInvalid.selector, 50 ether, 0));
+        lspVault.fulfillUnstakeRequestPartial{value: 0}(reqId);
+
+        vm.prank(routerCOA);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILSPVault.UnstakeFulfillmentAmountInvalid.selector, 50 ether, 50 ether + 1)
+        );
+        lspVault.fulfillUnstakeRequestPartial{value: 50 ether + 1}(reqId);
+    }
+
+    function testFulfillUnstakeRequestPartial_revertsIfNotConfirmed() public {
+        sFlow.mint(staker, 50 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 50 ether);
+        uint256 reqId = lspVault.requestUnstake(50 ether);
+        vm.stopPrank();
+
+        vm.prank(routerCOA);
+        vm.expectRevert(ILSPVault.InvalidRequest.selector);
+        lspVault.fulfillUnstakeRequestPartial{value: 10 ether}(reqId);
+    }
+
+    function testFulfillUnstakeRequestPartial_allowsFullConfirmedAmount() public {
+        sFlow.mint(staker, 50 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 50 ether);
+        uint256 reqId = lspVault.requestUnstake(50 ether);
+        vm.stopPrank();
+
+        vm.prank(routerCOA);
+        lspVault.withdrawPendingUnstakeSFlow(reqId);
+        vm.prank(routerCOA);
+        lspVault.confirmUnstakeRequest(reqId, 50 ether, 1);
+
+        vm.prank(routerCOA);
+        lspVault.fulfillUnstakeRequestPartial{value: 50 ether}(reqId);
+
+        assertEq(lspVault.pendingWithdrawals(staker), 50 ether);
     }
 
     function testStakeAndUnstakeRequestIds_useDistinctDomains() public {

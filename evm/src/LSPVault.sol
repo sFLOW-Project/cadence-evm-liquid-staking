@@ -319,23 +319,47 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     }
 
     /**
-     * Restricted to COA. Marks unstake as fulfilled and sends FLOW back to user.
-     * Keeper passes the actual FLOW amount returned by the Cadence LSP.
+     * Restricted to COA. Marks unstake as fulfilled and credits the FLOW sent with this call.
+     * Requires `msg.value == req.flowAmount` (the Cadence-confirmed amount).
      * @param _id id of the unstake request.
      */
-    function fulfillUnstakeRequest(uint256 _id) external onlyRouterCOA {
+    function fulfillUnstakeRequest(uint256 _id) external payable onlyRouterCOA {
         UnstakeRequest storage req = unstakeRequests[_id];
-
         if (req.status != RequestStatus.UNSTAKE_CONFIRMED) {
             revert InvalidRequest();
         }
+        if (msg.value != req.flowAmount) {
+            revert UnstakeFulfillmentAmountInvalid(req.flowAmount, msg.value);
+        }
+        _fulfillUnstakeRequest(_id, msg.value);
+    }
 
+    /**
+     * Restricted to COA. Recovery fulfill when Cadence returned less FLOW than confirmed
+     * (`RelayerRouter.evictStuckReceipt` / `LiquidStaking.withdrawStuckReceipt`).
+     * Credits `msg.value` and requires `0 < msg.value <= req.flowAmount`.
+     * @param _id id of the unstake request.
+     */
+    function fulfillUnstakeRequestPartial(uint256 _id) external payable onlyRouterCOA {
+        UnstakeRequest storage req = unstakeRequests[_id];
+        if (req.status != RequestStatus.UNSTAKE_CONFIRMED) {
+            revert InvalidRequest();
+        }
+        if (msg.value == 0 || msg.value > req.flowAmount) {
+            revert UnstakeFulfillmentAmountInvalid(req.flowAmount, msg.value);
+        }
+        _fulfillUnstakeRequest(_id, msg.value);
+    }
+
+    function _fulfillUnstakeRequest(uint256 _id, uint256 credited) private {
+        UnstakeRequest storage req = unstakeRequests[_id];
         req.status = RequestStatus.FULFILLED;
+        req.flowAmount = credited;
 
         FLOW_RECEIPT.burn(req.user, receipts[_id][ReceiptType.UNSTAKE]);
-        pendingWithdrawals[req.user] += req.flowAmount;
+        pendingWithdrawals[req.user] += credited;
 
-        emit UnstakeFulfilled(_id, req.user, req.flowAmount);
+        emit UnstakeFulfilled(_id, req.user, credited);
     }
 
     /// Pull native FLOW locked for a pending stake to the COA (`msg.sender`) for bridging to Cadence.

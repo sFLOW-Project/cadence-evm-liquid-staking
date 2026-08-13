@@ -55,6 +55,7 @@ interface ILSPVault is ILSPVaultConfig {
     error InvalidRate();
     error NotRequestOwner();
     error CantCancelRequestYet();
+    error UnstakeFulfillmentAmountInvalid(uint256 confirmedAmount, uint256 fulfilledAmount);
 
     // Events
     event StakeRequested(uint256 indexed id, address indexed user, uint256 amount);
@@ -73,7 +74,8 @@ interface ILSPVault is ILSPVaultConfig {
     function cancelStakeRequest(uint256 _id) external;
     function cancelUnstakeRequest(uint256 _id) external;
     function fulfillStakeRequest(uint256 _id, uint256 _sFlowAmount) external;
-    function fulfillUnstakeRequest(uint256 _id) external;
+    function fulfillUnstakeRequest(uint256 _id) external payable;
+    function fulfillUnstakeRequestPartial(uint256 _id) external payable;
     function withdrawPendingStakeNative(uint256 _id) external returns (uint256 amount);
     function cancelStakeRequestSlippage(uint256 _id) external payable;
     function withdrawPendingUnstakeSFlow(uint256 _id) external returns (uint256 amount);
