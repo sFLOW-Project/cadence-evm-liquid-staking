@@ -48,7 +48,7 @@ access(all) contract LiquidStakingConfig {
         access(self) let coa: @EVM.CadenceOwnedAccount
         access(self) let vault: EVM.EVMAddress
         
-        access(self) fun borrowCoa(): auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount {
+        access(self) fun borrowCoa(): auth(EVM.Call) &EVM.CadenceOwnedAccount {
             return (&self.coa)
         }
 

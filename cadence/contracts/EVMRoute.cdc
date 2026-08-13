@@ -148,7 +148,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun readStakeRequest(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         id: UInt256
     ): StakeRequestRead {
@@ -170,7 +170,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun readVaultConfig(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress
     ): VaultConfigRead {
         let CONFIG_RETURNDATA_LENGTH = 128
@@ -195,7 +195,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun readUnstakeRequest(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         id: UInt256
     ): UnstakeRequestRead {
@@ -216,7 +216,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun withdrawPendingStakeNative(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         stakeRequestId: UInt256
     ) {
@@ -231,7 +231,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun cancelStakeRequestSlippage(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         stakeRequestId: UInt256,
         refundAtto: UInt
@@ -251,7 +251,7 @@ access(all) contract EVMRoute {
 
     /// ERC-20 `transfer(lspVault, amount)` to move bridged sFlow into `LSPVault`.
     access(all) fun transferSFlowToVault(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         sFlow: EVM.EVMAddress,
         vault: EVM.EVMAddress,
         amountWei: UInt256
@@ -270,7 +270,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun fulfillStakeRequest(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         stakeRequestId: UInt256,
         sFlowAmountWei: UInt256
@@ -289,7 +289,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun syncRate(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         rateScaled: UInt256
     ) {
@@ -304,7 +304,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun withdrawPendingUnstakeSFlow(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         id: UInt256
     ) {
@@ -319,7 +319,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun confirmUnstakeRequest(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         id: UInt256,
         flowAmount: UInt256,
@@ -336,7 +336,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun sendNativeValue(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         to: EVM.EVMAddress,
         attoflowAmount: UInt
     ) {
@@ -350,7 +350,7 @@ access(all) contract EVMRoute {
     }
 
     access(all) fun fulfillUnstakeRequest(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         id: UInt256,
         attoflowAmount: UInt
@@ -371,7 +371,7 @@ access(all) contract EVMRoute {
     /// Recovery fulfill when Cadence returned less FLOW than `req.flowAmount`.
     /// Credits `attoflowAmount` on EVM (`LSPVault.fulfillUnstakeRequestPartial`).
     access(all) fun fulfillUnstakeRequestPartial(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         id: UInt256,
         attoflowAmount: UInt
@@ -407,7 +407,7 @@ access(all) contract EVMRoute {
     }
 
     access(account) fun setProtocolFee(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         fee: UInt256
     ) {
@@ -422,7 +422,7 @@ access(all) contract EVMRoute {
     }
     
     access(account) fun setStakingPaused(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         paused: Bool
     ) {
@@ -437,7 +437,7 @@ access(all) contract EVMRoute {
     }
 
     access(account) fun setMinRequestAmount(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         amount: UInt256
     ) {
@@ -452,7 +452,7 @@ access(all) contract EVMRoute {
     }
 
     access(account) fun setSlippageTolerance(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         slippageTolerance: UInt256
     ) {
@@ -466,7 +466,7 @@ access(all) contract EVMRoute {
         assert(res.status == EVM.Status.successful, message: "setSlippageTolerance call failed")
     }
     access(account) fun updateConfig(
-        coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount,
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
         minRequestAmount: UInt256,
         isStakingPaused: Bool,

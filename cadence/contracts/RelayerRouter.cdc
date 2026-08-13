@@ -38,6 +38,8 @@ access(all) contract RelayerRouter {
     access(self) let vaultIdentifier: String
     access(self) let coa: @EVM.CadenceOwnedAccount
 
+    /// Full COA entitlements: this contract `call`s EVM, `withdraw`s native FLOW to Cadence,
+    /// and `withdrawTokens` (bridge) sFlow. `EVMRoute` wrappers only require `EVM.Call`.
     access(self) fun borrowCoa(): auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount {
         return (&self.coa)
     }
