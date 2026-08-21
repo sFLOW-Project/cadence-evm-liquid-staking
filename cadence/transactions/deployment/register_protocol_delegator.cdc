@@ -6,16 +6,12 @@ import "LiquidStakingConfig"
 /// table by routing `commitAmount` FLOW from the signer's `/storage/flowTokenVault` through
 /// `LiquidStakingConfig.Admin.registerDelegator`.
 ///
-/// The resulting `NodeDelegator` is stored at `LiquidStakingConfig.DelegatorStoragePath` and is
-/// the single account-bound delegator that `LiquidStaking.stake / unstake / compoundRewards`
-/// will borrow.
-///
-/// Must be called exactly once per deployment. Re-running will panic if a delegator already
-/// occupies the storage path.
-///
 /// Arguments:
 ///   - `nodeID`        Flow node ID this protocol delegates to
 ///   - `commitAmount`  initial FLOW committed to bootstrap the delegator (`> 0.0`)
+///
+/// Inserts a slot into `DelegatorSet` at `DelegatorStoragePath` (creates the set
+/// on first call). Safe to call again to add another node/slot.
 transaction(nodeID: String, commitAmount: UFix64) {
     prepare(signer: auth(BorrowValue) &Account) {
         let admin = signer.storage

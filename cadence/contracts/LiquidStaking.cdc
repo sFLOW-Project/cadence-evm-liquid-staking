@@ -45,12 +45,8 @@ access(all) contract LiquidStaking {
         let flowAmount = from.balance
         let sFlowAmount = self.calcSFlowFromFlow(flowAmount: flowAmount)
 
-        let delegator = self.account.storage
-            .borrow<auth(FlowIDTableStaking.DelegatorOwner) &FlowIDTableStaking.NodeDelegator>(
-                from: LiquidStakingConfig.DelegatorStoragePath
-            ) ?? panic("No delegator configured")
-
-        delegator.delegateNewTokens(from: <-from)
+        // Manager: commit onto Active deposit-target delegator
+        LiquidStakingConfig.depositToCommitted(from: <-from)
 
         self.totalFlowStaked = self.totalFlowStaked + flowAmount
 
@@ -77,24 +73,31 @@ access(all) contract LiquidStaking {
 
         sFlowToken.burnTokens(from: <-from)
 
-        let delegator = self.account.storage
-            .borrow<auth(FlowIDTableStaking.DelegatorOwner) &FlowIDTableStaking.NodeDelegator>(
-                from: LiquidStakingConfig.DelegatorStoragePath
-            ) ?? panic("No delegator configured")
-
-        delegator.requestUnstaking(amount: flowAmount)
+        // Manager: reserve / request FLOW across DelegatorSet slots
+        let allocation = LiquidStakingConfig.requestWithdrawFromStaked(amount: flowAmount)
 
         self.totalFlowStaked = self.totalFlowStaked - flowAmount
 
-        let unlockEpoch = FlowEpoch.currentEpochCounter + 2
+        let receipt <- create FlowReceipt(
+            amount: flowAmount,
+            unlockEpoch: allocation.unlockEpoch
+        )
+        LiquidStakingConfig.bindWithdrawClaim(
+            ticketId: allocation.ticketId,
+            receiptUuid: receipt.uuid
+        )
 
-        let receipt <- create FlowReceipt(amount: flowAmount, unlockEpoch: unlockEpoch)
-
-        emit UnstakeRequested(id: receipt.uuid, sFlowAmount: sFlowAmount, flowAmount: flowAmount, unlockEpoch: unlockEpoch)
+        emit UnstakeRequested(
+            id: receipt.uuid,
+            sFlowAmount: sFlowAmount,
+            flowAmount: flowAmount,
+            unlockEpoch: allocation.unlockEpoch
+        )
 
         return <- receipt
     }
 
+    /// Cash out a matured `FlowReceipt` from the manager's unstaked buckets.
     access(all) fun withdraw(receipt: @FlowReceipt): @FlowToken.Vault {
         pre {
             /// Setting unstakeUnlockEpochDelay allows admin to apply delay to the currently pending requests
@@ -104,12 +107,10 @@ access(all) contract LiquidStaking {
 
         emit UnstakeFulfilled(id: receipt.uuid, flowAmount: receipt.amount)
 
-        let delegator = self.account.storage
-            .borrow<auth(FlowIDTableStaking.DelegatorOwner) &FlowIDTableStaking.NodeDelegator>(
-                from: LiquidStakingConfig.DelegatorStoragePath
-            ) ?? panic("No delegator configured")
-
-        let flowVault <- delegator.withdrawUnstakedTokens(amount: receipt.amount) as! @FlowToken.Vault
+        let flowVault <- LiquidStakingConfig.withdrawFromUnstaked(
+            receiptUuid: receipt.uuid,
+            amount: receipt.amount
+        )
 
         destroy receipt
 
@@ -119,7 +120,7 @@ access(all) contract LiquidStaking {
     /// Admin recovery withdraw for stuck EVM unstake receipts (`RelayerRouter.evictStuckReceipt`).
     /// Differs from `withdraw`:
     ///   - Honors base `receipt.unlockEpoch` only (ignores retroactive `unstakeUnlockEpochDelay`).
-    ///   - Pulls `min(receipt.amount, tokensUnstaked)` when the delegator bucket is short.
+    ///   - Pulls available unstaked FLOW across claim legs when buckets are short.
     ///   - Credits `receipt.amount - withdrawAmount` back to `totalFlowStaked`.
     /// The returned vault balance is the amount EVM must credit (`fulfillUnstakeRequestPartial`
     /// when it is less than `receipt.amount`). The Cadence receipt is always destroyed.
@@ -129,31 +130,16 @@ access(all) contract LiquidStaking {
                 "Base unstake unlock epoch not reached: epoch \(FlowEpoch.currentEpochCounter) < \(receipt.unlockEpoch)"
         }
 
-        let delegator = self.account.storage
-            .borrow<auth(FlowIDTableStaking.DelegatorOwner) &FlowIDTableStaking.NodeDelegator>(
-                from: LiquidStakingConfig.DelegatorStoragePath
-            ) ?? panic("No delegator configured")
-
-        let info = FlowIDTableStaking.DelegatorInfo(
-            nodeID: delegator.nodeID,
-            delegatorID: delegator.id
+        let requested = receipt.amount
+        let flowVault <- LiquidStakingConfig.withdrawFromUnstakedPartial(
+            receiptUuid: receipt.uuid,
+            amount: requested
         )
-
-        var withdrawAmount = receipt.amount
-        if info.tokensUnstaked < withdrawAmount {
-            withdrawAmount = info.tokensUnstaked
-        }
-
-        assert(
-            withdrawAmount > 0.0,
-            message: "No unstaked FLOW available for stuck receipt (requested \(receipt.amount), tokensUnstaked \(info.tokensUnstaked))"
-        )
+        let withdrawAmount = flowVault.balance
 
         emit UnstakeFulfilled(id: receipt.uuid, flowAmount: withdrawAmount)
 
-        let flowVault <- delegator.withdrawUnstakedTokens(amount: withdrawAmount) as! @FlowToken.Vault
-
-        self.totalFlowStaked = self.totalFlowStaked + (receipt.amount - withdrawAmount)
+        self.totalFlowStaked = self.totalFlowStaked + (requested - withdrawAmount)
 
         destroy receipt
 
@@ -250,44 +236,16 @@ access(all) contract LiquidStaking {
                 "Total sFlow supply \(sFlowToken.totalSupply) must be > 0 to compound rewards"
         }
 
-        let delegator = self.account.storage
-            .borrow<auth(FlowIDTableStaking.DelegatorOwner) &FlowIDTableStaking.NodeDelegator>(
-                from: LiquidStakingConfig.DelegatorStoragePath
-            ) ?? panic("No delegator configured")
+        let result = LiquidStakingConfig.compoundDelegatorRewards()
+        if result.rewardAmount <= 0.0 { return }
 
-        let info = FlowIDTableStaking.DelegatorInfo(
-            nodeID: delegator.nodeID,
-            delegatorID: delegator.id
-        )
-        let rewardAmount = info.tokensRewarded
-        if rewardAmount <= 0.0 { return }
+        self.totalFlowStaked = self.totalFlowStaked + result.restakedAmount
 
-        let feeAmount = rewardAmount * LiquidStakingConfig.protocolFeePercent
-        let restakeAmount = rewardAmount - feeAmount
-
-        if feeAmount > 0.0 {
-            let feeVault <- delegator.withdrawRewardedTokens(amount: feeAmount)
-            let treasury = getAccount(LiquidStakingConfig.protocolFeeReceiver)
-                .capabilities
-                .borrow<&{FungibleToken.Receiver}>(LiquidStakingConfig.ProtocolFeeReceiverPublicPath)
-                ?? panic("Protocol fee receiver not found at public path (publish FLOW receiver there)")
-            treasury.deposit(from: <- feeVault)
-        }
-
-        delegator.delegateRewardedTokens(amount: restakeAmount)
-        self.totalFlowStaked = self.totalFlowStaked + restakeAmount
-
-        emit RewardsCompounded(rewardAmount: rewardAmount, feeAmount: feeAmount)
+        emit RewardsCompounded(rewardAmount: result.rewardAmount, feeAmount: result.feeAmount)
     }
 
     access(all) fun getDelegatorInfo(): FlowIDTableStaking.DelegatorInfo {
-        let delegator = self.account.storage
-            .borrow<&FlowIDTableStaking.NodeDelegator>(from: LiquidStakingConfig.DelegatorStoragePath)
-            ?? panic("No delegator configured")
-        return FlowIDTableStaking.DelegatorInfo(
-            nodeID: delegator.nodeID,
-            delegatorID: delegator.id
-        )
+        return LiquidStakingConfig.getDepositTargetInfo()
     }
 
     access(all) view fun flowPerSFlow(): UFix64 {

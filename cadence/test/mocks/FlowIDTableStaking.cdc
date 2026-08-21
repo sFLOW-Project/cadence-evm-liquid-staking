@@ -168,7 +168,9 @@ access(all) contract FlowIDTableStaking {
             self.tokensUnstaking = bucket.unstaking
             self.tokensUnstaked = bucket.unstaked
             self.tokensRewarded = bucket.rewarded
-            self.tokensRequestedToUnstake = bucket.unstaking
+            // Mock collapses request → unstaking in one step, so requested is always 0 here.
+            // Production FlowIDTableStaking keeps a separate tokensRequestedToUnstake balance.
+            self.tokensRequestedToUnstake = 0.0
         }
     }
 
@@ -246,6 +248,17 @@ access(all) contract FlowIDTableStaking {
         for key in self.buckets.keys {
             let bucket = self.borrowBucket(key: key) ?? panic("missing bucket")
             let _ = bucket.matureUnstaking()
+        }
+    }
+
+    /// Simulate a node full-exit: move all committed+staked into unstaking without
+    /// going through protocol claim accounting.
+    access(all) fun forceExitDelegator(nodeID: String, delegatorID: UInt32) {
+        let key = self.bucketKey(nodeID: nodeID, delegatorID: delegatorID)
+        let bucket = self.borrowBucket(key: key) ?? panic("delegator not found")
+        let amount = bucket.staked + bucket.committed
+        if amount > 0.0 {
+            bucket.moveStakedToUnstaking(amount: amount)
         }
     }
 

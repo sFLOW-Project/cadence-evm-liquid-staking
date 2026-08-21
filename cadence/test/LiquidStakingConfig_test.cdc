@@ -361,11 +361,10 @@ fun testAdminRegisterDelegatorPersistsAndExposesInfo() {
         "import \"FlowIDTableStaking\"\n"
             .concat("import \"LiquidStakingConfig\"\n")
             .concat("access(all) fun main(): [UFix64] {\n")
-            .concat("    let acct = getAuthAccount<auth(BorrowValue) &Account>(0x0000000000000007)\n")
-            .concat("    let delegator = acct.storage\n")
-            .concat("        .borrow<&FlowIDTableStaking.NodeDelegator>(from: LiquidStakingConfig.DelegatorStoragePath)\n")
-            .concat("        ?? panic(\"delegator missing\")\n")
-            .concat("    let info = FlowIDTableStaking.DelegatorInfo(nodeID: delegator.nodeID, delegatorID: delegator.id)\n")
+            .concat("    let snaps = LiquidStakingConfig.getSlotSnapshots()\n")
+            .concat("    assert(snaps.length == 1, message: \"expected one slot\")\n")
+            .concat("    let s = snaps[0]\n")
+            .concat("    let info = FlowIDTableStaking.DelegatorInfo(nodeID: s.nodeID, delegatorID: s.flowDelegatorId)\n")
             .concat("    return [info.tokensCommitted, info.tokensStaked, info.tokensUnstaking, info.tokensUnstaked, info.tokensRewarded]\n")
             .concat("}\n"),
         []
