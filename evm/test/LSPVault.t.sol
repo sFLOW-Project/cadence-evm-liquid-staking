@@ -122,6 +122,29 @@ contract LSPVaultTest is Test {
         vm.stopPrank();
     }
 
+    function testRequestUnstakeNormalizesFlowEquivalentToCadenceGrid() public {
+        // Rate 1e18+1 wei makes flowEquivalent = 1e18+1 wei for 1 sFlow.
+        // The +1 wei is below CADENCE_DECIMAL_SCALE (1e10) and must be discarded from the receipt.
+        vm.prank(routerCOA);
+        lspVault.syncRate(1 ether + 1);
+
+        uint256 amount = 1 ether;
+        sFlow.mint(staker, amount);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), amount);
+
+        uint256 expectedNormalizedFlow = 1 ether;
+        uint256 requestId = _unstakeRequestId(staker, 0);
+
+        lspVault.requestUnstake(amount);
+        vm.stopPrank();
+
+        // Full sFlow amount is transferred, but the receipt face value is quantized to the Cadence grid.
+        assertEq(sFlow.balanceOf(address(lspVault)), amount);
+        assertEq(flowReceipt.balanceOf(staker), expectedNormalizedFlow);
+        assertEq(lspVault.receipts(requestId, ILSPVault.ReceiptType.UNSTAKE), expectedNormalizedFlow);
+    }
+
     function testFulfillStakeRequestRevertsIfRequestIsNotPending() public {
         vm.prank(routerCOA);
         vm.expectRevert(ILSPVault.InvalidRequest.selector);

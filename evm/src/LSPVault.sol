@@ -179,19 +179,22 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
      * @custom:throws AmountNotCadenceRepresentable if `_amount` is not a multiple of `CADENCE_DECIMAL_SCALE` (1e10).
      */
     function requestUnstake(uint256 _amount) external returns (uint256) {
-        uint256 flowEquivalent = _flowFromSFlow(_amount);
-        if (flowEquivalent < _config.minRequestAmount) {
-            revert OperationAmountTooLow(_config.minRequestAmount, flowEquivalent);
-        }
         _requireCadenceRepresentable(_amount);
+
+        uint256 flowEquivalent = _flowFromSFlow(_amount);
+        uint256 normalizedFlowAmount = flowEquivalent - (flowEquivalent % CADENCE_DECIMAL_SCALE);
+
+        if (normalizedFlowAmount < _config.minRequestAmount) {
+            revert OperationAmountTooLow(_config.minRequestAmount, normalizedFlowAmount);
+        }
 
         IERC20(S_FLOW_ADDRESS).safeTransferFrom(msg.sender, address(this), _amount);
 
         uint256 nonce = unstakeRequestCount[msg.sender];
         uint256 requestId = _nextUnstakeRequestId(msg.sender, nonce);
 
-        FLOW_RECEIPT.mint(msg.sender, flowEquivalent);
-        receipts[requestId][ReceiptType.UNSTAKE] = flowEquivalent;
+        FLOW_RECEIPT.mint(msg.sender, normalizedFlowAmount);
+        receipts[requestId][ReceiptType.UNSTAKE] = normalizedFlowAmount;
 
         unstakeRequests[requestId] = UnstakeRequest({
             status: RequestStatus.QUEUED,
