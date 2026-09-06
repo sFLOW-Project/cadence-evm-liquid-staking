@@ -57,6 +57,16 @@ access(all) contract LiquidStakingConfig {
     )
     access(all) event UnstakeClaimWithdrawn(receiptUuid: UInt64, flowAmount: UFix64)
 
+    /// Pair used to order exiting slots by earliest unlock epoch (SFL-06).
+    access(all) struct SlotEpoch {
+        access(all) let slotId: UInt64
+        access(all) let epoch: UInt64
+        init(slotId: UInt64, epoch: UInt64) {
+            self.slotId = slotId
+            self.epoch = epoch
+        }
+    }
+
     /// One claim against a single slot for a receipt.
     access(all) struct ClaimLeg {
         access(all) let slotId: UInt64
@@ -478,13 +488,84 @@ access(all) contract LiquidStakingConfig {
             )
         }
 
+        /// Earliest unlock epoch a slot can satisfy a new exiting claim, accounting for
+        /// existing pendingClaims. Returns UInt64.max if no exiting capacity remains.
+        access(self) fun earliestExitingUnlockEpoch(slot: &DelegatorSlot): UInt64 {
+            let info = slot.info()
+            var unstaked = info.tokensUnstaked
+            var unstaking = info.tokensUnstaking
+            var requested = info.tokensRequestedToUnstake
+            var reserved = slot.pendingClaims
+
+            if reserved > 0.0 {
+                let u = reserved < unstaked ? reserved : unstaked
+                unstaked = unstaked - u
+                reserved = reserved - u
+            }
+            if reserved > 0.0 {
+                let u = reserved < unstaking ? reserved : unstaking
+                unstaking = unstaking - u
+                reserved = reserved - u
+            }
+            if reserved > 0.0 {
+                let u = reserved < requested ? reserved : requested
+                requested = requested - u
+                reserved = reserved - u
+            }
+
+            let current = FlowEpoch.currentEpochCounter
+            if unstaked > 0.0 { return current }
+            if unstaking > 0.0 { return current + 1 }
+            if requested > 0.0 { return current + 2 }
+            return UInt64.max
+        }
+
+        /// Sort slot IDs by earliest exiting unlock epoch, using slot ID as tie-breaker.
+        access(self) fun sortSlotIdsByExitingEpoch(slotIds: [UInt64]): [UInt64] {
+            var pairs: [SlotEpoch] = []
+            var i = 0
+            while i < slotIds.length {
+                let slot = self.borrowSlot(slotIds[i])
+                pairs.append(SlotEpoch(
+                    slotId: slot.id,
+                    epoch: self.earliestExitingUnlockEpoch(slot: slot)
+                ))
+                i = i + 1
+            }
+
+            // Bubble sort: earliest epoch first, slot ID as deterministic tie-breaker.
+            i = 0
+            while i < pairs.length {
+                var j = i + 1
+                while j < pairs.length {
+                    let pi = pairs[i]
+                    let pj = pairs[j]
+                    if pj.epoch < pi.epoch || (pj.epoch == pi.epoch && pj.slotId < pi.slotId) {
+                        pairs[i] = pj
+                        pairs[j] = pi
+                    }
+                    j = j + 1
+                }
+                i = i + 1
+            }
+
+            var sorted: [UInt64] = []
+            var k = 0
+            while k < pairs.length {
+                sorted.append(pairs[k].slotId)
+                k = k + 1
+            }
+            return sorted
+        }
+
         access(self) fun allocateExitingAcross(slotIds: [UInt64], remaining: UFix64): AllocationPass {
+            let orderedIds = self.sortSlotIdsByExitingEpoch(slotIds: slotIds)
             var left = remaining
             var legs: [ClaimLeg] = []
             var unlockEpoch = FlowEpoch.currentEpochCounter
             var i = 0
-            while i < slotIds.length && left > 0.0 {
-                let slot = self.borrowSlot(slotIds[i])
+            while i < orderedIds.length && left > 0.0 {
+                let slot = self.borrowSlot(orderedIds[i])
                 let info = slot.info()
                 let taken = LiquidStakingConfig.takeFromExiting(
                     info: info,

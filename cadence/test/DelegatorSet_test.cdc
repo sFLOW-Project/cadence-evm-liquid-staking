@@ -75,7 +75,7 @@ access(all)
 fun testNodeExitThenUnstakeAllocatesExitingWithoutNewRequest() {
     // Stake more on slot 0, then force-exit the Flow delegator.
     stake(200.0)
-    let flowDelId = readSlotsFlatFlowDelegatorId(0)
+    let flowDelId = readSlotFlowDelegatorId(0)
     forceExit(nodeA, flowDelId)
 
     let flatAfterExit = readSlotsFlat()
@@ -143,6 +143,45 @@ fun testUnstakePrefersDrainingExitingOverActiveNewRequest() {
         Test.assertEqual(slot1StakedBefore, slot1After[3])
         Test.assertEqual(0.0, slot1After[1])
     }
+}
+
+access(all)
+fun testUnstakeAllocatesFromEarliestExitingEpochFirst() {
+    // SFL-06: within the draining group, allocation must order slots by earliest
+    // unlock epoch (not dictionary key order). Register two fresh draining slots
+    // whose slot IDs are the opposite of maturity order: slot 3 has unstaked
+    // (current-epoch) capacity while slot 2 has only unstaking (next-epoch).
+    registerDelegator(nodeA, 100.0)
+    registerDelegator(nodeB, 100.0)
+    markDraining(2)
+    markDraining(3)
+
+    let slot2FlowDelId = readSlotFlowDelegatorId(2)
+    let slot3FlowDelId = readSlotFlowDelegatorId(3)
+
+    // Both new slots become exiting (unstaking buckets).
+    forceExit(nodeA, slot2FlowDelId)
+    forceExit(nodeB, slot3FlowDelId)
+
+    // Mature only slot 3 so it has unstaked (current-epoch) capacity.
+    matureUnstakingAmount(nodeB, slot3FlowDelId, 100.0)
+
+    let slot0Before = readSlot(0)
+    let slot2Before = readSlot(2)
+    let slot3Before = readSlot(3)
+
+    // Unstake an amount fully coverable by slot 3's earliest-epoch capacity.
+    unstake(10.0)
+
+    let slot0After = readSlot(0)
+    let slot2After = readSlot(2)
+    let slot3After = readSlot(3)
+
+    // Slot 3 (earliest epoch) should have taken the claim; earlier-ID draining
+    // slots should be untouched.
+    Test.assertEqual(slot3Before[1] + 10.0, slot3After[1])
+    Test.assertEqual(slot2Before[1], slot2After[1])
+    Test.assertEqual(slot0Before[1], slot0After[1])
 }
 
 // ---- helpers ----
@@ -295,6 +334,17 @@ fun withdraw(_ uuid: UInt64) {
 }
 
 access(all)
+fun matureUnstakingAmount(_ nodeID: String, _ delegatorID: UInt32, _ amount: UFix64) {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/mature_unstaking_amount.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [nodeID, delegatorID, amount],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
+access(all)
 fun advanceEpoch(_ n: UInt64) {
     let tx = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/advance_epoch.cdc"),
@@ -415,13 +465,21 @@ fun readEpochCounter(): UInt64 {
 }
 
 access(all)
-fun readSlotsFlatFlowDelegatorId(_ slotIndex: Int): UInt32 {
+fun readSlotFlowDelegatorId(_ slotId: UInt64): UInt32 {
     let r = Test.executeScript(
         "import \"LiquidStakingConfig\"\n"
-            .concat("access(all) fun main(i: Int): UInt32 {\n")
-            .concat("    return LiquidStakingConfig.getSlotSnapshots()[i].flowDelegatorId\n")
+            .concat("access(all) fun main(slotId: UInt64): UInt32 {\n")
+            .concat("    let snaps = LiquidStakingConfig.getSlotSnapshots()\n")
+            .concat("    var i = 0\n")
+            .concat("    while i < snaps.length {\n")
+            .concat("        if snaps[i].slotId == slotId {\n")
+            .concat("            return snaps[i].flowDelegatorId\n")
+            .concat("        }\n")
+            .concat("        i = i + 1\n")
+            .concat("    }\n")
+            .concat("    panic(\"slot not found\")\n")
             .concat("}\n"),
-        [slotIndex]
+        [slotId]
     )
     Test.expect(r, Test.beSucceeded())
     return r.returnValue! as! UInt32
