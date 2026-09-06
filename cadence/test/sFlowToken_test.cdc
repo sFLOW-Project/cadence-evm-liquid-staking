@@ -179,6 +179,16 @@ fun testContractViewsAllBranches() {
     Test.assertEqual(sFlowToken.totalSupply, supply.supply)
 }
 
+access(all)
+fun testFTVaultDataLinkedTypesAreBorrowable() {
+    let scriptResult = Test.executeScript(
+        Test.readFile("../../cadence/test/helpers/borrow_ftvaultdata_capabilities.cdc"),
+        [protocolAddress]
+    )
+    Test.expect(scriptResult, Test.beSucceeded())
+    Test.assertEqual(true, scriptResult.returnValue! as! Bool)
+}
+
 // ---- helpers ----
 
 access(all)

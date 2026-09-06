@@ -200,17 +200,15 @@ access(all) contract sFlowToken: FungibleToken {
         let vault <- create Vault(balance: self.totalSupply)
         self.account.storage.save(<-vault, to: self.tokenVaultPath)
 
-        // Create a public capability to the stored Vault that only exposes
-        // the `deposit` method through the `Receiver` interface
+        // Create public capabilities matching the FTVaultData advertised types so wallets
+        // can borrow the composite-restricted receiver and metadata references (SFL-04).
         self.account.capabilities.publish(
-            self.account.capabilities.storage.issue<&{FungibleToken.Receiver}>(self.tokenVaultPath),
+            self.account.capabilities.storage.issue<&{FungibleToken.Receiver, FungibleToken.Vault}>(self.tokenVaultPath),
             at: self.tokenReceiverPath
         )
 
-        // Create a public capability to the stored Vault that only exposes
-        // the `balance` field through the `Balance` interface
         self.account.capabilities.publish(
-            self.account.capabilities.storage.issue<&{FungibleToken.Balance}>(self.tokenVaultPath),
+            self.account.capabilities.storage.issue<&{FungibleToken.Balance, FungibleToken.Vault}>(self.tokenVaultPath),
             at: self.tokenBalancePath
         )
     }
