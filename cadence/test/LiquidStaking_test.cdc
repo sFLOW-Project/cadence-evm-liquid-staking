@@ -770,6 +770,99 @@ fun matureUnstakingAmount(_ amount: UFix64) {
     Test.expect(tx, Test.beSucceeded())
 }
 
+// ---- 9. loss realization ----
+
+access(all)
+fun testRealizeLossReducesTotalFlowStakedAndEmits() {
+    // Clean up any receipts left over from earlier shared-state tests.
+    advanceEpoch(3)
+    withdrawAllReceipts(userAccount)
+
+    let stakeAmount: UFix64 = 100.0
+    let stakeTx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_stake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [stakeAmount],
+    ))
+    Test.expect(stakeTx, Test.beSucceeded())
+
+    // The test setup registers the protocol delegator with 100 FLOW outside of
+    // LiquidStaking.stake, so totalFlowStaked (101 after user stake) is below the
+    // actual bucket balance. Slash 150 FLOW to make actual backing (51) fall below
+    // totalFlowStaked, creating a 50 FLOW verifiable shortfall.
+    slash(mockNodeID, 1 as UInt32, 150.0)
+
+    let before = readTotalFlowStaked()
+    let loss = 30.0
+    realizeLoss(loss)
+    Test.assertEqual(before - loss, readTotalFlowStaked())
+}
+
+access(all)
+fun testRealizeLossRevertsWithOutstandingReceipt() {
+    let stakeAmount: UFix64 = 1_000.0
+    Test.expect(Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_stake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [stakeAmount],
+    )), Test.beSucceeded())
+
+    // Create a small outstanding FlowReceipt so totalFlowStaked stays high enough
+    // that a slash creates a verifiable shortfall while the receipt is live.
+    Test.expect(Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [1.0],
+    )), Test.beSucceeded())
+
+    // Slash to create a verifiable shortfall.
+    slash(mockNodeID, 1 as UInt32, 150.0)
+
+    // realizeLoss must revert because a fixed-receipt claim is still outstanding.
+    Test.expect(Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/transactions/admin/realize_loss.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [30.0],
+    )), Test.beFailed())
+}
+
+access(all)
+fun withdrawAllReceipts(_ account: Test.TestAccount) {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/withdraw_all_receipts.cdc"),
+        authorizers: [account.address],
+        signers: [account],
+        arguments: [],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
+access(all)
+fun realizeLoss(_ amount: UFix64) {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/transactions/admin/realize_loss.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [amount],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
+access(all)
+fun slash(_ nodeID: String, _ delegatorID: UInt32, _ amount: UFix64) {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/slash_delegator.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [nodeID, delegatorID, amount],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
 // ---- read-only helpers (always via script so we get fresh contract state) ----
 
 access(all)

@@ -16,6 +16,10 @@ access(all) contract LiquidStaking {
     /// Total FLOW the protocol controls (staked + committed + compounded rewards − unstaked).
     access(all) var totalFlowStaked: UFix64
 
+    /// Total FLOW amount currently locked in outstanding `FlowReceipt` resources.
+    /// Used to block `realizeLoss` while fixed-receipt claims exist.
+    access(all) var totalFlowReceiptsOutstanding: UFix64
+
     /// Permanently locked protocol-owned sFLOW. Seeded once with matching FLOW backing so
     /// `totalSupply` cannot be burned down to a UFix64 dust amount (SFL-01).
     access(all) let protocolOwnedSFlowFloor: UFix64
@@ -26,6 +30,7 @@ access(all) contract LiquidStaking {
     access(all) event UnstakeRequested(id: UInt64, sFlowAmount: UFix64, flowAmount: UFix64, unlockEpoch: UInt64)
     access(all) event UnstakeFulfilled(id: UInt64, flowAmount: UFix64)
     access(all) event UnstakeFlowRoutedToEvm(id: UInt64, flowAmount: UFix64)
+    access(all) event LossRealized(amount: UFix64, totalFlowStaked: UFix64)
     access(all) event RewardsCompounded(rewardAmount: UFix64, feeAmount: UFix64)
     access(all) event FlowReceiptDeposited(id: UInt64, flowAmount: UFix64, unlockEpoch: UInt64, owner: Address?)
     access(all) event FlowReceiptWithdrawn(id: UInt64, flowAmount: UFix64, unlockEpoch: UInt64, owner: Address?)
@@ -125,6 +130,7 @@ access(all) contract LiquidStaking {
             amount: flowAmount,
             unlockEpoch: allocation.unlockEpoch
         )
+        self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding + flowAmount
         LiquidStakingConfig.bindWithdrawClaim(
             ticketId: allocation.ticketId,
             receiptUuid: receipt.uuid
@@ -155,6 +161,7 @@ access(all) contract LiquidStaking {
             amount: receipt.amount
         )
 
+        self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding - receipt.amount
         destroy receipt
 
         return <- flowVault
@@ -183,10 +190,63 @@ access(all) contract LiquidStaking {
         emit UnstakeFulfilled(id: receipt.uuid, flowAmount: withdrawAmount)
 
         self.totalFlowStaked = self.totalFlowStaked + (requested - withdrawAmount)
+        self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding - requested
 
         destroy receipt
 
         return <- flowVault
+    }
+
+    /// Governance-only loss realization. Permanently reduces `totalFlowStaked` when a
+    /// genuine, unrecoverable slashing loss has been confirmed. The loss is bounded by
+    /// the verifiable shortfall between `totalFlowStaked` and the actual FLOW currently
+    /// held across all protocol delegator slots (read from `FlowIDTableStaking`). This
+    /// prevents phantom backing and limits admin discretion. Caller must hold the
+    /// protocol `LiquidStakingConfig.Admin` resource.
+    access(all) fun realizeLoss(amount: UFix64, admin: &LiquidStakingConfig.Admin) {
+        pre {
+            amount > 0.0: "Loss amount must be positive"
+            amount <= self.totalFlowStaked: "Loss \(amount) exceeds totalFlowStaked \(self.totalFlowStaked)"
+            self.totalFlowReceiptsOutstanding == 0.0:
+                "Cannot realize loss while FlowReceipts are outstanding: \(self.totalFlowReceiptsOutstanding) FLOW"
+        }
+
+        let actualBacking = self.actualDelegatorBacking()
+        let maxLoss = self.totalFlowStaked > actualBacking
+            ? self.totalFlowStaked - actualBacking
+            : 0.0
+        assert(
+            amount <= maxLoss,
+            message: "Loss \(amount) exceeds verifiable shortfall \(maxLoss)"
+        )
+
+        self.totalFlowStaked = self.totalFlowStaked - amount
+        emit LossRealized(amount: amount, totalFlowStaked: self.totalFlowStaked)
+    }
+
+    /// Sum of all FLOW currently in protocol delegator buckets (committed + staked +
+    /// unstaking + unstaked + rewarded + requested), read directly from the canonical
+    /// `FlowIDTableStaking.DelegatorInfo` for each slot. Used to bound `realizeLoss`.
+    access(self) fun actualDelegatorBacking(): UFix64 {
+        var total = 0.0
+        let snapshots = LiquidStakingConfig.getSlotSnapshots()
+        var i = 0
+        while i < snapshots.length {
+            let s = snapshots[i]
+            let info = FlowIDTableStaking.DelegatorInfo(
+                nodeID: s.nodeID,
+                delegatorID: s.flowDelegatorId
+            )
+            total = total
+                + info.tokensCommitted
+                + info.tokensStaked
+                + info.tokensUnstaking
+                + info.tokensUnstaked
+                + info.tokensRewarded
+                + info.tokensRequestedToUnstake
+            i = i + 1
+        }
+        return total
     }
 
     access(all) struct FlowReceiptMetadata {
@@ -361,6 +421,7 @@ access(all) contract LiquidStaking {
         self.FlowReceiptCollectionPath = /storage/liquid_staking_flow_receipt_collection
         self.FlowReceiptCollectionPublicPath = /public/liquid_staking_flow_receipt_collection
         self.totalFlowStaked = 0.0
+        self.totalFlowReceiptsOutstanding = 0.0
         self.protocolOwnedSFlowFloor = 1.0
         self.protocolOwnedSFlow <- sFlowToken.createEmptyVault(vaultType: Type<@sFlowToken.Vault>())
         let pool <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>())

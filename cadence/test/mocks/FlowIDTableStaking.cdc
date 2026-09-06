@@ -103,6 +103,11 @@ access(all) contract FlowIDTableStaking {
             self.vault.deposit(from: <-from)
         }
 
+        access(contract) fun slash(amount: UFix64) {
+            assert(amount <= self.staked, message: "Slash amount exceeds staked balance")
+            self.staked = self.staked - amount
+        }
+
         init() {
             self.committed = 0.0
             self.staked = 0.0
@@ -260,6 +265,14 @@ access(all) contract FlowIDTableStaking {
         if amount > 0.0 {
             bucket.moveStakedToUnstaking(amount: amount)
         }
+    }
+
+    /// Simulate a slashing event: permanently remove `amount` FLOW from the delegator's
+    /// staked bucket. Used only in tests to verify `LiquidStaking.realizeLoss` bounds.
+    access(all) fun slash(nodeID: String, delegatorID: UInt32, amount: UFix64) {
+        let key = self.bucketKey(nodeID: nodeID, delegatorID: delegatorID)
+        let bucket = self.borrowBucket(key: key) ?? panic("delegator not found")
+        bucket.slash(amount: amount)
     }
 
     /// Current reward-pool balance (used by tests for sanity).
