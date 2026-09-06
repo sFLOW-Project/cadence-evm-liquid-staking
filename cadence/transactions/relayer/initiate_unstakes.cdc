@@ -13,7 +13,7 @@ import "RelayerRouter"
 /// Each bridged sFlow withdraw crosses the Flow EVM bridge and incurs a FLOW fee; bound it
 /// with `maxBridgeFlowFee`, same scoping pattern as `handle_stakes.cdc`.
 transaction(unstakeRequestIds: [UInt256], maxBridgeFlowFee: UFix64) {
-    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController) &Account) {
+    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, GetStorageCapabilityController) &Account) {
         let providerCap = signer.capabilities.storage
             .issue<auth(FungibleToken.Withdraw) &FlowToken.Vault>(/storage/flowTokenVault)
 
@@ -29,5 +29,11 @@ transaction(unstakeRequestIds: [UInt256], maxBridgeFlowFee: UFix64) {
         )
 
         destroy scopedProvider
+
+        // Delete the temporary capability controller so repeated relayer calls do not leak
+        // persistent storage controllers (SFL-05).
+        let controller = signer.capabilities.storage.getController(byCapabilityID: providerCap.id)
+            ?? panic("Could not find issued FlowToken provider capability controller")
+        controller.delete()
     }
 }

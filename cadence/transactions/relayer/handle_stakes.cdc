@@ -19,7 +19,7 @@ import "RelayerRouter"
 ///                          across the whole batch (set generously above the bridge's
 ///                          current `baseFee + storageFee` per request)
 transaction(stakeRequestIds: [UInt256], maxBridgeFlowFee: UFix64) {
-    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController) &Account) {
+    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, GetStorageCapabilityController) &Account) {
         let providerCap = signer.capabilities.storage
             .issue<auth(FungibleToken.Withdraw) &FlowToken.Vault>(/storage/flowTokenVault)
 
@@ -35,5 +35,11 @@ transaction(stakeRequestIds: [UInt256], maxBridgeFlowFee: UFix64) {
         )
 
         destroy scopedProvider
+
+        // Delete the temporary capability controller so repeated relayer calls do not leak
+        // persistent storage controllers (SFL-05).
+        let controller = signer.capabilities.storage.getController(byCapabilityID: providerCap.id)
+            ?? panic("Could not find issued FlowToken provider capability controller")
+        controller.delete()
     }
 }
