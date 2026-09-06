@@ -28,6 +28,7 @@ fun setup() {
     Test.expect(mintResult, Test.beSucceeded())
     setupSFlowVault(protocolAccount)
     registerDelegator(nodeA, 50.0)
+    seedProtocolOwnedSFlow()
     seedRewardPool(amount: 1_000.0)
 }
 
@@ -39,11 +40,11 @@ fun testDelegatorSetCreatedOnFirstRegister() {
     Test.assertEqual(0.0, summary["pending"]! as! UFix64)
 
     let flat = readSlotsFlat()
-    // slot0: id=0, status=Active(0), pending=0, committed=0, staked=50, ...
+    // slot0: id=0, status=Active(0), pending=0, committed=0, staked=51 (50 register + 1 seed), ...
     Test.assertEqual(0.0, flat[0])
     Test.assertEqual(0.0, flat[1])
     Test.assertEqual(0.0, flat[2])
-    Test.assertEqual(50.0, flat[4])
+    Test.assertEqual(51.0, flat[4])
 }
 
 access(all)
@@ -245,6 +246,17 @@ fun seedRewardPool(amount: UFix64) {
         authorizers: [protocolAddress],
         signers: [protocolAccount],
         arguments: [amount],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
+access(all)
+fun seedProtocolOwnedSFlow() {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/seed_protocol_owned_sflow.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [],
     ))
     Test.expect(tx, Test.beSucceeded())
 }

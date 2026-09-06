@@ -1,8 +1,7 @@
 import "LiquidStaking"
 
-/// Live Cadence-side exchange rate (FLOW per 1 sFlow), `1.0` when the supply is zero.
-/// The relayer compares this to the value most recently sent to the LSPVault via `syncRate`
-/// to detect drift between the two ledgers.
-access(all) fun main(): UFix64 {
-    return LiquidStaking.flowPerSFlow()
+/// Canonical Cadence exchange rate (`flowPerSFlowScaled`), same 1e18 convention as
+/// `LSPVault.syncRate`. Compare this to the vault's stored rate for ledger drift.
+access(all) fun main(): UInt256 {
+    return LiquidStaking.flowPerSFlowScaled()
 }

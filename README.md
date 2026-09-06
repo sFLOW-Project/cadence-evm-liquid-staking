@@ -32,7 +32,9 @@ Three moving parts:
 | `LiquidStaking.cdc` | Protocol accounting (`totalFlowStaked`), `NodeDelegator`, withdraw pool, and public `stake` / `unstake` / `withdraw`. **`RelayerRouter`** calls `stake` / `unstake` / `withdraw` for EVM paths; **`withdraw`** consumes a `FlowReceipt` after the unlock epoch. |
 
 **Exchange rate (Cadence)**  
-`flowPerSFlow = totalFlowStaked / sFlowToken.totalSupply` (and inverse for minting on stake). Compounding increases `totalFlowStaked` without minting new `sFlow`, so each `sFlow` gradually represents more FLOW.
+Canonical rate is `flowPerSFlowScaled = totalFlowStaked / sFlowToken.totalSupply` at `EVMRoute.ratioScaleFactor` (1e18), the same integer the relayer pushes to `LSPVault.syncRate`. Cadence `UFix64` is only for token vault balances, not for publishing the rate. Compounding increases `totalFlowStaked` without minting new `sFlow`, so each `sFlow` gradually represents more FLOW.
+
+After `register_protocol_delegator`, run **`cadence/transactions/deployment/seed_protocol_owned_sflow.cdc`** once. That locks `protocolOwnedSFlowFloor` (1.0) sFLOW with matching FLOW backing so permissionless burns cannot compress supply to dust.
 
 **Cadence `stake` / `unstake` / `withdraw`**  
 Available on-contract for **`RelayerRouter`**, tests, and **`cadence/transactions/user/`**. See e.g. **`cadence/transactions/user/withdraw.cdc`** after the epoch gate (`FlowEpoch` + `LiquidStakingConfig.unstakeUnlockEpochDelay`).
@@ -138,7 +140,7 @@ flowchart TD
   Tx[Cadence_tx_any_payer]
   Router[RelayerRouter]
   Compound[compoundRewards]
-  Read[flowPerSFlow]
+  Read[flowPerSFlowScaled]
   CoaRef[protocol_router_COA]
   EvmCall[COA_call_syncRate]
   Vault[LSPVault_on_EVM]
@@ -201,7 +203,9 @@ Run these **from the protocol Cadence account** in order:
 
 11. **`cadence/transactions/deployment/register_protocol_delegator.cdc`** — **`Admin.registerDelegator`** with **`nodeID`** + FLOW commitment.
 
-12. **`cadence/transactions/deployment/install_relayer_router.cdc`** — **`RelayerRouter.cdc`** source **`String`** + **`lspVaultEvmHex`** + **`sFlowEvmHex`**; **moves** the saved router COA **into** **`RelayerRouter`** (run **after** steps 7–11).
+12. **`cadence/transactions/deployment/seed_protocol_owned_sflow.cdc`** — lock **1.0** protocol-owned sFLOW (required before user / relayer `stake`).
+
+13. **`cadence/transactions/deployment/install_relayer_router.cdc`** — **`RelayerRouter.cdc`** source **`String`** + **`lspVaultEvmHex`** + **`sFlowEvmHex`**; **moves** the saved router COA **into** **`RelayerRouter`** (run **after** steps 7–12).
 
 Install txs that take contract **`code`** typically wire **`--args-json`** with file contents via shell (**`jq -Rs`** etc.). **`flow cadence lint`** against **`flow.deploy.json`** helps validate transaction scripts before sending.
 

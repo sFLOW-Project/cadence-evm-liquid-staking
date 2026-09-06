@@ -299,12 +299,10 @@ access(all) contract RelayerRouter {
 
         LiquidStaking.compoundRewards()
 
-        let newRate = LiquidStaking.flowPerSFlow()
-        let rateScaled = EVMRoute.ufix64FlowToWeiUInt256(newRate)
         EVMRoute.syncRate(
             coa: coa,
             vault: self.vaultAddr(),
-            rateScaled: rateScaled
+            rateScaled: LiquidStaking.flowPerSFlowScaled()
         )
     }
 

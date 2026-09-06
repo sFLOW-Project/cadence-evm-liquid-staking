@@ -49,9 +49,13 @@ fun testInitialState() {
     Test.assertEqual(0 as UInt64, readEpochCounter())
     Test.assertEqual(true, readStakingEnabled())
     Test.assertEqual(0.0, readTotalFlowStaked())
+    Test.assertEqual(0.0, readProtocolOwnedSFlow())
+    Test.assertEqual(false, readIsProtocolOwnedSFlowSeeded())
     Test.assertEqual(0.0, readSFlowTotalSupply())
     Test.assertEqual(1.0, readFlowPerSFlow())
     Test.assertEqual(1.0, readSFlowPerFlow())
+    Test.assertEqual(readRatioScaleFactor(), readFlowPerSFlowScaled())
+    Test.assertEqual(readRatioScaleFactor(), readSFlowPerFlowScaled())
 }
 
 access(all)
@@ -82,6 +86,53 @@ fun testCompoundRewardsRevertsWithZeroSupply() {
     ))
     Test.expect(txResult, Test.beFailed())
     Test.assert(txResult.error != nil, message: "expected compound to fail with zero sFlow supply")
+}
+
+access(all)
+fun testStakeRevertsWhenProtocolOwnedFloorNotSeeded() {
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_stake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [50.0],
+    ))
+    Test.expect(txResult, Test.beFailed())
+    Test.assert(
+        errorIncludes(txResult.error?.message, substring: "floor not seeded"),
+        message: "stake must require protocol-owned sFLOW seed"
+    )
+}
+
+access(all)
+fun testSeedProtocolOwnedSFlow() {
+    seedProtocolOwnedSFlow()
+    Test.assertEqual(true, readIsProtocolOwnedSFlowSeeded())
+    Test.assertEqual(1.0, readProtocolOwnedSFlow())
+    Test.assertEqual(1.0, readSFlowTotalSupply())
+    Test.assertEqual(1.0, readTotalFlowStaked())
+    Test.assertEqual(1.0, readFlowPerSFlow())
+    Test.assertEqual(readRatioScaleFactor(), readFlowPerSFlowScaled())
+
+    let seeded = Test.eventsOfType(Type<LiquidStaking.ProtocolOwnedSFlowSeeded>())
+    Test.assert(seeded.length >= 1, message: "expected ProtocolOwnedSFlowSeeded")
+    let last = seeded[seeded.length - 1] as! LiquidStaking.ProtocolOwnedSFlowSeeded
+    Test.assertEqual(1.0, last.flowAmount)
+    Test.assertEqual(1.0, last.sFlowAmount)
+}
+
+access(all)
+fun testSeedProtocolOwnedSFlowTwiceReverts() {
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/seed_protocol_owned_sflow.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [],
+    ))
+    Test.expect(txResult, Test.beFailed())
+    Test.assert(
+        errorIncludes(txResult.error?.message, substring: "already seeded"),
+        message: "second seed must revert"
+    )
 }
 
 // ---- 2. stake happy path ----
@@ -206,6 +257,7 @@ fun testCompoundRewardsTakesFeeAndCompoundsRest() {
     let supplyBefore = readSFlowTotalSupply()
     let treasuryBefore = readFlowBalance(protocolAddress)
     let ratioBefore = readFlowPerSFlow()
+    let scaledBefore = readFlowPerSFlowScaled()
 
     let txResult = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/compound_rewards.cdc"),
@@ -222,6 +274,7 @@ fun testCompoundRewardsTakesFeeAndCompoundsRest() {
     Test.assertEqual(supplyBefore, readSFlowTotalSupply())
     Test.assertEqual(treasuryBefore + feeExpected, readFlowBalance(protocolAddress))
     Test.assert(readFlowPerSFlow() > ratioBefore, message: "flowPerSFlow must strictly increase after compound")
+    Test.assert(readFlowPerSFlowScaled() > scaledBefore, message: "flowPerSFlowScaled must strictly increase after compound")
 
     let compounded = Test.eventsOfType(Type<LiquidStaking.RewardsCompounded>())
     let lastEv = compounded[compounded.length - 1] as! LiquidStaking.RewardsCompounded
@@ -662,6 +715,17 @@ fun setUnstakeDelay(_ n: UInt64) {
 }
 
 access(all)
+fun seedProtocolOwnedSFlow() {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/seed_protocol_owned_sflow.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
+access(all)
 fun accrueRewards(amount: UFix64) {
     // delegator IDs start at 1 in our mock; the protocol always gets ID=1
     let tx = Test.executeTransaction(Test.Transaction(
@@ -776,6 +840,56 @@ fun readSFlowPerFlow(): UFix64 {
     )
     Test.expect(r, Test.beSucceeded())
     return r.returnValue! as! UFix64
+}
+
+access(all)
+fun readFlowPerSFlowScaled(): UInt256 {
+    let r = Test.executeScript(
+        "import \"LiquidStaking\"\naccess(all) fun main(): UInt256 { return LiquidStaking.flowPerSFlowScaled() }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UInt256
+}
+
+access(all)
+fun readSFlowPerFlowScaled(): UInt256 {
+    let r = Test.executeScript(
+        "import \"LiquidStaking\"\naccess(all) fun main(): UInt256 { return LiquidStaking.sFlowPerFlowScaled() }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UInt256
+}
+
+access(all)
+fun readProtocolOwnedSFlow(): UFix64 {
+    let r = Test.executeScript(
+        "import \"LiquidStaking\"\naccess(all) fun main(): UFix64 { return LiquidStaking.protocolOwnedSFlowBalance() }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UFix64
+}
+
+access(all)
+fun readIsProtocolOwnedSFlowSeeded(): Bool {
+    let r = Test.executeScript(
+        "import \"LiquidStaking\"\naccess(all) fun main(): Bool { return LiquidStaking.isProtocolOwnedSFlowSeeded() }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! Bool
+}
+
+access(all)
+fun readRatioScaleFactor(): UInt256 {
+    let r = Test.executeScript(
+        "import \"EVMRoute\"\naccess(all) fun main(): UInt256 { return EVMRoute.ratioScaleFactor }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UInt256
 }
 
 access(all)

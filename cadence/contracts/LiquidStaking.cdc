@@ -16,7 +16,13 @@ access(all) contract LiquidStaking {
     /// Total FLOW the protocol controls (staked + committed + compounded rewards − unstaked).
     access(all) var totalFlowStaked: UFix64
 
+    /// Permanently locked protocol-owned sFLOW. Seeded once with matching FLOW backing so
+    /// `totalSupply` cannot be burned down to a UFix64 dust amount (SFL-01).
+    access(all) let protocolOwnedSFlowFloor: UFix64
+    access(self) let protocolOwnedSFlow: @sFlowToken.Vault
+
     access(all) event Staked(flowAmount: UFix64, sFlowAmount: UFix64)
+    access(all) event ProtocolOwnedSFlowSeeded(flowAmount: UFix64, sFlowAmount: UFix64)
     access(all) event UnstakeRequested(id: UInt64, sFlowAmount: UFix64, flowAmount: UFix64, unlockEpoch: UInt64)
     access(all) event UnstakeFulfilled(id: UInt64, flowAmount: UFix64)
     access(all) event UnstakeFlowRoutedToEvm(id: UInt64, flowAmount: UFix64)
@@ -34,16 +40,53 @@ access(all) contract LiquidStaking {
         }
     }
 
+    access(all) view fun protocolOwnedSFlowBalance(): UFix64 {
+        return self.protocolOwnedSFlow.balance
+    }
+
+    access(all) view fun isProtocolOwnedSFlowSeeded(): Bool {
+        return self.protocolOwnedSFlow.balance >= self.protocolOwnedSFlowFloor
+    }
+
+    /// Stake `protocolOwnedSFlowFloor` FLOW once and lock the minted sFLOW in this contract.
+    /// Rate stays 1.0 after seed; user deposits are not diluted.
+    access(all) fun seedProtocolOwnedSFlow(from: @FlowToken.Vault) {
+        pre {
+            !self.isProtocolOwnedSFlowSeeded():
+                "Protocol-owned sFLOW floor already seeded"
+            from.balance == self.protocolOwnedSFlowFloor:
+                "Seed FLOW amount \(from.balance) must equal floor \(self.protocolOwnedSFlowFloor)"
+            LiquidStakingConfig.isStakingPaused == false: "Staking is paused"
+            FlowIDTableStaking.stakingEnabled() == true: "Not in the Flow chain staking period"
+        }
+
+        let flowAmount = from.balance
+        let minted <- self.mintSFlowForFlow(from: <-from)
+        let sFlowAmount = minted.balance
+        self.protocolOwnedSFlow.deposit(from: <-minted)
+        emit ProtocolOwnedSFlowSeeded(flowAmount: flowAmount, sFlowAmount: sFlowAmount)
+    }
+
     access(all) fun stake(from: @FlowToken.Vault): @sFlowToken.Vault {
         pre {
+            self.isProtocolOwnedSFlowSeeded():
+                "Protocol-owned sFLOW floor not seeded"
             LiquidStakingConfig.isStakingPaused == false: "Staking is paused"
             FlowIDTableStaking.stakingEnabled() == true: "Not in the Flow chain staking period"
             from.balance >= LiquidStakingConfig.minOperationAmount:
                 "Stake amount \(from.balance) must be >= min \(LiquidStakingConfig.minOperationAmount)"
         }
 
+        return <- self.mintSFlowForFlow(from: <-from)
+    }
+
+    access(self) fun mintSFlowForFlow(from: @FlowToken.Vault): @sFlowToken.Vault {
         let flowAmount = from.balance
         let sFlowAmount = self.calcSFlowFromFlow(flowAmount: flowAmount)
+        assert(
+            sFlowAmount > 0.0,
+            message: "Stake FLOW amount \(flowAmount) mints 0 sFlow at current backing/supply"
+        )
 
         // Manager: commit onto Active deposit-target delegator
         LiquidStakingConfig.depositToCommitted(from: <-from)
@@ -248,28 +291,37 @@ access(all) contract LiquidStaking {
         return LiquidStakingConfig.getDepositTargetInfo()
     }
 
-    access(all) view fun flowPerSFlow(): UFix64 {
-        if self.totalFlowStaked == 0.0 { return 1.0 }
-        if sFlowToken.totalSupply == 0.0 { return 1.0 }
+    /// Canonical FLOW-per-sFLOW rate at `EVMRoute.ratioScaleFactor` (1e18). Use this for
+    /// EVM `syncRate` and any protocol path. Token vaults stay `UFix64`; the *rate* does not.
+    access(all) view fun flowPerSFlowScaled(): UInt256 {
+        if self.totalFlowStaked == 0.0 || sFlowToken.totalSupply == 0.0 {
+            return EVMRoute.ratioScaleFactor
+        }
         let backingScaled =
             EVMRoute.tokenUFix64ToScaledUInt256(self.totalFlowStaked)
         let supplyScaled =
             EVMRoute.tokenUFix64ToScaledUInt256(sFlowToken.totalSupply)
-        let ratioScaled =
-            backingScaled * EVMRoute.ratioScaleFactor / supplyScaled
-        return EVMRoute.ratioScaled1e18ToUFix64(ratioScaled)
+        return backingScaled * EVMRoute.ratioScaleFactor / supplyScaled
+    }
+
+    access(all) view fun sFlowPerFlowScaled(): UInt256 {
+        if self.totalFlowStaked == 0.0 || sFlowToken.totalSupply == 0.0 {
+            return EVMRoute.ratioScaleFactor
+        }
+        let backingScaled =
+            EVMRoute.tokenUFix64ToScaledUInt256(self.totalFlowStaked)
+        let supplyScaled =
+            EVMRoute.tokenUFix64ToScaledUInt256(sFlowToken.totalSupply)
+        return supplyScaled * EVMRoute.ratioScaleFactor / backingScaled
+    }
+
+    /// Display helper. Not used by rate sync. Panics if the scaled rate cannot fit in `UFix64`.
+    access(all) view fun flowPerSFlow(): UFix64 {
+        return EVMRoute.ratioScaled1e18ToUFix64(self.flowPerSFlowScaled())
     }
 
     access(all) view fun sFlowPerFlow(): UFix64 {
-        if self.totalFlowStaked == 0.0 { return 1.0 }
-        if sFlowToken.totalSupply == 0.0 { return 1.0 }
-        let backingScaled =
-            EVMRoute.tokenUFix64ToScaledUInt256(self.totalFlowStaked)
-        let supplyScaled =
-            EVMRoute.tokenUFix64ToScaledUInt256(sFlowToken.totalSupply)
-        let ratioScaled =
-            supplyScaled * EVMRoute.ratioScaleFactor / backingScaled
-        return EVMRoute.ratioScaled1e18ToUFix64(ratioScaled)
+        return EVMRoute.ratioScaled1e18ToUFix64(self.sFlowPerFlowScaled())
     }
 
     access(all) view fun calcSFlowFromFlow(flowAmount: UFix64): UFix64 {
@@ -309,6 +361,8 @@ access(all) contract LiquidStaking {
         self.FlowReceiptCollectionPath = /storage/liquid_staking_flow_receipt_collection
         self.FlowReceiptCollectionPublicPath = /public/liquid_staking_flow_receipt_collection
         self.totalFlowStaked = 0.0
+        self.protocolOwnedSFlowFloor = 1.0
+        self.protocolOwnedSFlow <- sFlowToken.createEmptyVault(vaultType: Type<@sFlowToken.Vault>())
         let pool <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>())
         self.account.storage.save(<-pool, to: LiquidStakingConfig.WithdrawPoolStoragePath)
     }

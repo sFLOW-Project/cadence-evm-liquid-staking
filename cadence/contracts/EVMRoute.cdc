@@ -3,7 +3,7 @@ import "EVM"
 /// LSP EVM surface: ABI encode/decode helpers and `coa.call` wrappers for `LSPVault` / sFlow ERC-20.
 ///
 /// **`ratioScaleFactor`** and token/`UInt256` conversion helpers are the single source for Cadence ↔ EVM amount lanes
-/// and for **`LiquidStaking`** exchange-rate math (`flowPerSFlow`, mint/redeem).
+/// and for **`LiquidStaking`** exchange-rate math (`flowPerSFlowScaled`, mint/redeem).
 ///
 
 access(all) contract EVMRoute {
@@ -120,6 +120,7 @@ access(all) contract EVMRoute {
     }
 
     /// Convert **`ratioScaled`** (approximately `trueRatio * ratioScaleFactor`) to **`UFix64`**.
+    /// Display / tests only — protocol rate publication uses the `UInt256` value directly.
     access(all) view fun ratioScaled1e18ToUFix64(_ ratioScaled: UInt256): UFix64 {
         let scale = self.ratioScaleFactor
         let MAX_FRACTIONAL_PART: UInt256 = 9551615
