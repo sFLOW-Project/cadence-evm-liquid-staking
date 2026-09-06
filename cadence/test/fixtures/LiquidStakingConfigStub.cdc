@@ -241,9 +241,22 @@ access(all) contract LiquidStakingConfig {
 
         access(contract) fun markDraining(slotId: UInt64) {
             let slot = self.borrowSlot(slotId)
+            assert(
+                slot.status == LiquidStakingConfig.slotStatusActive,
+                message: "Slot \(slotId) is not Active"
+            )
+
             slot.setStatus(LiquidStakingConfig.slotStatusDraining)
+
+            // Move deposit target to another active slot so staking keeps working.
             if self.depositTarget == slotId {
-                self.depositTarget = nil
+                let activeIds = self.slotIdsWithStatus(LiquidStakingConfig.slotStatusActive)
+                if activeIds.length > 0 {
+                    self.depositTarget = activeIds[0]
+                    emit DepositTargetUpdated(slotId: activeIds[0])
+                } else {
+                    self.depositTarget = nil
+                }
             }
             emit DelegatorSlotDraining(slotId: slotId)
         }
@@ -261,6 +274,10 @@ access(all) contract LiquidStakingConfig {
         access(contract) fun retireSlot(slotId: UInt64) {
             let slot = self.borrowSlot(slotId)
             assert(
+                slot.status == LiquidStakingConfig.slotStatusDraining,
+                message: "Slot \(slotId) must be Draining before retirement"
+            )
+            assert(
                 slot.pendingClaims == 0.0,
                 message: "Cannot retire slot \(slotId) with pendingClaims \(slot.pendingClaims)"
             )
@@ -272,9 +289,18 @@ access(all) contract LiquidStakingConfig {
                 residual == 0.0,
                 message: "Cannot retire slot \(slotId) with residual FLOW \(residual)"
             )
+
+            // If retiring the current deposit target, move target to another active slot.
             if self.depositTarget == slotId {
-                self.depositTarget = nil
+                let activeIds = self.slotIdsWithStatus(LiquidStakingConfig.slotStatusActive)
+                assert(
+                    activeIds.length > 0,
+                    message: "Cannot retire deposit target slot \(slotId): no active slot to replace it"
+                )
+                self.depositTarget = activeIds[0]
+                emit DepositTargetUpdated(slotId: activeIds[0])
             }
+
             let removed <- self.slots.remove(key: slotId)
                 ?? panic("Slot \(slotId) missing")
             destroy removed
