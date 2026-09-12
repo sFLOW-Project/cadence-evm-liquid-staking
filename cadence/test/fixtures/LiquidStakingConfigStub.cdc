@@ -21,6 +21,7 @@ access(all) contract LiquidStakingConfig {
     access(all) var protocolFeePercent: UFix64
 
     access(all) var isStakingPaused: Bool
+    access(all) var isUnstakingPaused: Bool
     access(all) var minOperationAmount: UFix64
 
     access(all) var unstakeUnlockEpochDelay: UInt64
@@ -36,6 +37,7 @@ access(all) contract LiquidStakingConfig {
     access(all) event ProtocolFeeUpdated(oldFee: UFix64, newFee: UFix64)
     access(all) event ProtocolFeeReceiverUpdated(oldReceiver: Address, newReceiver: Address)
     access(all) event StakingPauseUpdated(paused: Bool)
+    access(all) event UnstakingPauseUpdated(paused: Bool)
     access(all) event MinStakeUpdated(oldMin: UFix64, newMin: UFix64)
     access(all) event UnstakeUnlockEpochDelayUpdated(oldDelayEpochs: UInt64, newDelayEpochs: UInt64)
     access(all) event DelegatorSlotAdded(slotId: UInt64, nodeID: String, flowDelegatorId: UInt32)
@@ -248,6 +250,14 @@ access(all) contract LiquidStakingConfig {
 
             slot.setStatus(LiquidStakingConfig.slotStatusDraining)
 
+            // Begin unwinding any committed/staked principal that is not already
+            // exiting, so the draining slot can wind down and eventually be retired.
+            let info = slot.info()
+            let remaining = info.tokensCommitted + info.tokensStaked
+            if remaining > 0.0 {
+                slot.borrowDelegator().requestUnstaking(amount: remaining)
+            }
+
             // Move deposit target to another active slot so staking keeps working.
             if self.depositTarget == slotId {
                 let activeIds = self.slotIdsWithStatus(LiquidStakingConfig.slotStatusActive)
@@ -446,7 +456,6 @@ access(all) contract LiquidStakingConfig {
                 i = i + 1
             }
 
-            assert(withdrawn > 0.0, message: "No unstaked FLOW available for stuck receipt \(receiptUuid)")
             assert(
                 self.totalPendingWithdrawal >= releasedClaims,
                 message: "totalPendingWithdrawal underflow on partial withdraw"
@@ -888,6 +897,9 @@ access(all) contract LiquidStakingConfig {
             LiquidStakingConfig.borrowSet().setDepositTarget(slotId: slotId)
         }
 
+        /// Test stub: no EVM mirror exists in `flow test`, so rate sync is a no-op.
+        access(all) fun syncRate(rateScaled: UInt256) { let _ = rateScaled }
+
         access(all) fun retireSlot(slotId: UInt64) {
             LiquidStakingConfig.borrowSet().retireSlot(slotId: slotId)
         }
@@ -915,6 +927,11 @@ access(all) contract LiquidStakingConfig {
         access(all) fun setStakingPaused(paused: Bool) {
             LiquidStakingConfig.isStakingPaused = paused
             emit StakingPauseUpdated(paused: paused)
+        }
+
+        access(all) fun setUnstakingPaused(paused: Bool) {
+            LiquidStakingConfig.isUnstakingPaused = paused
+            emit UnstakingPauseUpdated(paused: paused)
         }
 
         access(all) fun setMinOperationAmount(newMin: UFix64) {
@@ -984,6 +1001,7 @@ access(all) contract LiquidStakingConfig {
         self.protocolFeeTimelockDuration = 604800
         self.protocolFeeTimelockExpiration = 0
         self.isStakingPaused = false
+        self.isUnstakingPaused = false
         self.minOperationAmount = minOperationAmount
         self.unstakeUnlockEpochDelay = unstakeUnlockEpochDelay
         self.AdminStoragePath = /storage/liquidStakingAdmin

@@ -47,6 +47,7 @@ interface ILSPVault is ILSPVaultConfig {
     /// Amount is not an exact Cadence `UFix64` ulp (must be a multiple of `1e10` wei).
     error AmountNotCadenceRepresentable(uint256 amount);
     error StakingPaused();
+    error UnstakingPaused();
     error InvalidRequest();
     error NativeTransferFailed();
     error NotRouterCOA();
@@ -78,6 +79,7 @@ interface ILSPVault is ILSPVaultConfig {
     function fulfillStakeRequest(uint256 _id, uint256 _sFlowAmount) external;
     function fulfillUnstakeRequest(uint256 _id) external payable;
     function fulfillUnstakeRequestPartial(uint256 _id) external payable;
+    function fulfillUnstakeRequestZero(uint256 _id) external;
     function withdrawPendingStakeNative(uint256 _id) external returns (uint256 amount);
     function cancelStakeRequestSlippage(uint256 _id) external payable;
     function withdrawPendingUnstakeSFlow(uint256 _id) external returns (uint256 amount);

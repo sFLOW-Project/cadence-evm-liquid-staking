@@ -14,9 +14,9 @@ import "LiquidStakingConfig"
 ///   * identical init preconditions (`fee <= 0.2`, non-zero receiver/min, `delay <= 2`)
 ///   * identical event signatures + storage paths
 ///   * identical Admin surface for `registerDelegator`, `setProtocolFeeReceiver`,
-///     `setUnstakeUnlockEpochDelay`, `setStakingPaused`, `setMinOperationAmount`,
-///     `setSlippageTolerance`, `updateConfig`, `setProtocolFee` (queue) and
-///     `activateProtocolFee` (activation)
+///     `setUnstakeUnlockEpochDelay`, `setStakingPaused`, `setUnstakingPaused`,
+///     `setMinOperationAmount`, `setSlippageTolerance`, `updateConfig`,
+///     `setProtocolFee` (queue) and `activateProtocolFee` (activation)
 /// All EVM-mirror calls (`EVMRoute.set*`), init-time vault `getConfig()` checks,
 /// and EVM getters (`lspVaultEVMAddress`, `governanceCoaEVMAddress`) are documented as
 /// integration-test scope and are not exercised here.
@@ -91,9 +91,10 @@ fun testInitSucceeds() {
     let snap = readConfigSnapshot()
     Test.assertEqual(0.1, snap[1] as! UFix64)            // fee
     Test.assertEqual(protocolAddress, snap[0] as! Address)
-    Test.assertEqual(1.0, snap[5] as! UFix64)            // min
-    Test.assertEqual(0 as UInt64, snap[6] as! UInt64)    // delay
-    Test.assertEqual(false, snap[4] as! Bool)            // paused
+    Test.assertEqual(false, snap[4] as! Bool)            // staking paused
+    Test.assertEqual(false, snap[5] as! Bool)            // unstaking paused
+    Test.assertEqual(1.0, snap[6] as! UFix64)            // min
+    Test.assertEqual(0 as UInt64, snap[7] as! UInt64)    // delay
     Test.assertEqual(nil, snap[2])                       // pctQueued
     Test.assertEqual(/public/flowTokenReceiver, LiquidStakingConfig.ProtocolFeeReceiverPublicPath)
     Test.assertEqual(/storage/liquidStakingAdmin, LiquidStakingConfig.AdminStoragePath)
@@ -164,7 +165,7 @@ fun testAdminSetUnstakeUnlockEpochDelay() {
         arguments: [2 as UInt64],
     ))
     Test.expect(txResult, Test.beSucceeded())
-    Test.assertEqual(2 as UInt64, readConfigSnapshot()[6] as! UInt64)
+    Test.assertEqual(2 as UInt64, readConfigSnapshot()[7] as! UInt64)
 
     let revert = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/set_unstake_delay.cdc"),
@@ -197,7 +198,7 @@ fun testAdminSetMinOperationAmount() {
         arguments: [2.5],
     ))
     Test.expect(txResult, Test.beSucceeded())
-    Test.assertEqual(2.5, readConfigSnapshot()[5] as! UFix64)
+    Test.assertEqual(2.5, readConfigSnapshot()[6] as! UFix64)
 
     let revert = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/set_min_operation_amount.cdc"),
@@ -241,7 +242,7 @@ fun testAdminUpdateConfigUpdatesMinAndPause() {
         arguments: [2.5, true, 0.005],
     ))
     Test.expect(txResult, Test.beSucceeded())
-    Test.assertEqual(2.5, readConfigSnapshot()[5] as! UFix64)
+    Test.assertEqual(2.5, readConfigSnapshot()[6] as! UFix64)
     Test.assertEqual(true, readConfigSnapshot()[4] as! Bool)
 
     let revert = Test.executeTransaction(Test.Transaction(
@@ -251,7 +252,7 @@ fun testAdminUpdateConfigUpdatesMinAndPause() {
         arguments: [1.0, false, 0.01],
     ))
     Test.expect(revert, Test.beSucceeded())
-    Test.assertEqual(1.0, readConfigSnapshot()[5] as! UFix64)
+    Test.assertEqual(1.0, readConfigSnapshot()[6] as! UFix64)
     Test.assertEqual(false, readConfigSnapshot()[4] as! Bool)
 }
 
@@ -298,6 +299,34 @@ fun testAdminSetStakingPausedToggles() {
     ))
     Test.expect(unpause, Test.beSucceeded())
     Test.assertEqual(false, readConfigSnapshot()[4] as! Bool)
+}
+
+// ---- admin: setUnstakingPaused ----
+
+access(all)
+fun testAdminSetUnstakingPausedToggles() {
+    let pauseTx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/set_unstaking_paused.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [true],
+    ))
+    Test.expect(pauseTx, Test.beSucceeded())
+    Test.assertEqual(true, readConfigSnapshot()[5] as! Bool)
+
+    let evs = Test.eventsOfType(Type<LiquidStakingConfig.UnstakingPauseUpdated>())
+    Test.assert(evs.length >= 1, message: "expected UnstakingPauseUpdated event")
+    let last = evs[evs.length - 1] as! LiquidStakingConfig.UnstakingPauseUpdated
+    Test.assertEqual(true, last.paused)
+
+    let unpause = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/set_unstaking_paused.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [false],
+    ))
+    Test.expect(unpause, Test.beSucceeded())
+    Test.assertEqual(false, readConfigSnapshot()[5] as! Bool)
 }
 
 // ---- admin: setProtocolFee queue path ----

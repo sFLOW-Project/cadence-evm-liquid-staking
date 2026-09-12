@@ -35,6 +35,11 @@ access(all) contract LiquidStaking {
     access(all) event FlowReceiptDeposited(id: UInt64, flowAmount: UFix64, unlockEpoch: UInt64, owner: Address?)
     access(all) event FlowReceiptWithdrawn(id: UInt64, flowAmount: UFix64, unlockEpoch: UInt64, owner: Address?)
 
+    /// Bearer resource proving the holder is owed `amount` FLOW after `unlockEpoch`.
+    /// Destroying this resource outside the protocol `withdraw` / `withdrawStuckReceipt`
+    /// paths forfeits the withdrawal credential: the underlying FLOW and the slot's
+    /// `pendingClaims` remain in the protocol, but no one can present the receipt to
+    /// withdraw them. This is an accepted design limitation, not a recoverable error.
     access(all) resource FlowReceipt {
         access(all) let amount: UFix64
         access(all) let unlockEpoch: UInt64
@@ -110,6 +115,7 @@ access(all) contract LiquidStaking {
     access(all) fun unstake(from: @sFlowToken.Vault): @FlowReceipt {
         pre {
             FlowIDTableStaking.stakingEnabled() == true: "Not in the Flow chain staking period"
+            LiquidStakingConfig.isUnstakingPaused == false: "Unstaking is paused"
         }
 
         let sFlowAmount = from.balance
@@ -222,11 +228,21 @@ access(all) contract LiquidStaking {
 
         self.totalFlowStaked = self.totalFlowStaked - amount
         emit LossRealized(amount: amount, totalFlowStaked: self.totalFlowStaked)
+
+        /// If the loss wipes out all backing while sFLOW supply remains, the pool is
+        /// insolvent and `flowPerSFlowScaled` would panic. Do not push a stale rate
+        /// to EVM in that edge case; admin recapitalization is required before any
+        /// new operation can succeed.
+        if self.totalFlowStaked > 0.0 {
+            admin.syncRate(rateScaled: self.flowPerSFlowScaled())
+        }
     }
 
     /// Sum of all FLOW currently in protocol delegator buckets (committed + staked +
-    /// unstaking + unstaked + rewarded + requested), read directly from the canonical
+    /// unstaking + unstaked + rewarded), read directly from the canonical
     /// `FlowIDTableStaking.DelegatorInfo` for each slot. Used to bound `realizeLoss`.
+    /// `tokensRequestedToUnstake` is excluded because it is already reflected in
+    /// `tokensCommitted` + `tokensStaked`; adding it again double-counts the same FLOW.
     access(self) fun actualDelegatorBacking(): UFix64 {
         var total = 0.0
         let snapshots = LiquidStakingConfig.getSlotSnapshots()
@@ -243,7 +259,6 @@ access(all) contract LiquidStaking {
                 + info.tokensUnstaking
                 + info.tokensUnstaked
                 + info.tokensRewarded
-                + info.tokensRequestedToUnstake
             i = i + 1
         }
         return total
@@ -354,7 +369,11 @@ access(all) contract LiquidStaking {
     /// Canonical FLOW-per-sFLOW rate at `EVMRoute.ratioScaleFactor` (1e18). Use this for
     /// EVM `syncRate` and any protocol path. Token vaults stay `UFix64`; the *rate* does not.
     access(all) view fun flowPerSFlowScaled(): UInt256 {
-        if self.totalFlowStaked == 0.0 || sFlowToken.totalSupply == 0.0 {
+        if self.totalFlowStaked == 0.0 {
+            assert(
+                sFlowToken.totalSupply == 0.0,
+                message: "FLOW backing is zero while sFLOW supply remains; pool is insolvent"
+            )
             return EVMRoute.ratioScaleFactor
         }
         let backingScaled =
@@ -365,7 +384,11 @@ access(all) contract LiquidStaking {
     }
 
     access(all) view fun sFlowPerFlowScaled(): UInt256 {
-        if self.totalFlowStaked == 0.0 || sFlowToken.totalSupply == 0.0 {
+        if self.totalFlowStaked == 0.0 {
+            assert(
+                sFlowToken.totalSupply == 0.0,
+                message: "FLOW backing is zero while sFLOW supply remains; pool is insolvent"
+            )
             return EVMRoute.ratioScaleFactor
         }
         let backingScaled =
@@ -385,7 +408,11 @@ access(all) contract LiquidStaking {
     }
 
     access(all) view fun calcSFlowFromFlow(flowAmount: UFix64): UFix64 {
-        if self.totalFlowStaked <= 0.0 || sFlowToken.totalSupply <= 0.0 {
+        if self.totalFlowStaked <= 0.0 {
+            assert(
+                sFlowToken.totalSupply <= 0.0,
+                message: "Cannot mint sFLOW while FLOW backing is zero"
+            )
             return flowAmount
         }
         let backingScaled =

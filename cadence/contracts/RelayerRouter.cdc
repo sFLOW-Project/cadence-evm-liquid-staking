@@ -229,7 +229,8 @@ access(all) contract RelayerRouter {
     /// Uses `LiquidStaking.withdrawStuckReceipt`, which ignores retroactive unlock delay and
     /// withdraws up to available unstaked FLOW when the delegator bucket is short.
     /// EVM is credited with the FLOW actually returned (`fulfillUnstakeRequestPartial`
-    /// when that is less than the Cadence receipt), never the original confirmed amount.
+    /// when positive but less than the Cadence receipt, or `fulfillUnstakeRequestZero`
+    /// when nothing is recovered), never the original confirmed amount.
     access(all) fun evictStuckReceipt(
         unstakeRequestId: UInt256,
         admin: &LiquidStakingConfig.Admin
@@ -264,7 +265,13 @@ access(all) contract RelayerRouter {
 
         coa.deposit(from: <-flowVault)
 
-        if flowReturned < flowAmount {
+        if flowReturned == 0.0 {
+            EVMRoute.fulfillUnstakeRequestZero(
+                coa: coa,
+                vault: vaultAddr,
+                id: unstakeRequestId
+            )
+        } else if flowReturned < flowAmount {
             EVMRoute.fulfillUnstakeRequestPartial(
                 coa: coa,
                 vault: vaultAddr,

@@ -661,11 +661,16 @@ fun setupSFlowVault(_ acct: Test.TestAccount) {
 
 access(all)
 fun registerProtocolDelegator() {
+    registerProtocolDelegatorWithNodeID(nodeID: mockNodeID, amount: 100.0)
+}
+
+access(all)
+fun registerProtocolDelegatorWithNodeID(nodeID: String, amount: UFix64) {
     let tx = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/register_protocol_delegator.cdc"),
         authorizers: [protocolAddress],
         signers: [protocolAccount],
-        arguments: [mockNodeID, 100.0],
+        arguments: [nodeID, amount],
     ))
     Test.expect(tx, Test.beSucceeded())
 }
@@ -685,6 +690,17 @@ access(all)
 fun setStakingPaused(_ paused: Bool) {
     let tx = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/set_staking_paused.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [paused],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+}
+
+access(all)
+fun setUnstakingPaused(_ paused: Bool) {
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/set_unstaking_paused.cdc"),
         authorizers: [protocolAddress],
         signers: [protocolAccount],
         arguments: [paused],
@@ -831,6 +847,65 @@ fun testRealizeLossRevertsWithOutstandingReceipt() {
 }
 
 access(all)
+fun testUnstakeRevertsWhenUnstakingPaused() {
+    setUnstakingPaused(true)
+
+    let txResult = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [1.0],
+    ))
+    Test.expect(txResult, Test.beFailed())
+    Test.assert(
+        errorIncludes(txResult.error?.message, substring: "Unstaking is paused"),
+        message: "unstake must revert when unstaking is paused"
+    )
+
+    setUnstakingPaused(false)
+
+    let successTx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [1.0],
+    ))
+    Test.expect(successTx, Test.beSucceeded())
+}
+
+access(all)
+fun testMarkDrainingRequestsUnstakingOfRemainingPrincipal() {
+    // Clean up receipts from earlier shared-state tests.
+    advanceEpoch(3)
+    withdrawAllReceipts(userAccount)
+
+    // Register a second slot, then drain slot 1. Slot 0 stays Active as the deposit
+    // target so later tests are not affected.
+    registerProtocolDelegatorWithNodeID(nodeID: "lsp-mock-node-2", amount: 50.0)
+
+    let before = readSlotBuckets(slotId: 1)
+    let stakedBefore = before[3]
+
+    Test.expect(Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/mark_delegator_draining.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [1 as UInt64],
+    )), Test.beSucceeded())
+
+    let after = readSlotBuckets(slotId: 1)
+    let stakedAfter = after[3]
+    let unstakingAfter = after[4]
+
+    Test.assert(stakedAfter < stakedBefore, message: "draining slot must have reduced staked principal")
+    Test.assert(unstakingAfter > 0.0, message: "draining slot must have non-zero unstaking principal")
+
+    // The deposit target must have moved back to the remaining Active slot.
+    let summary = readDelegatorSetSummary()
+    Test.assertEqual(0 as UInt64?, summary["depositTarget"]! as! UInt64?)
+}
+
+access(all)
 fun withdrawAllReceipts(_ account: Test.TestAccount) {
     let tx = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/withdraw_all_receipts.cdc"),
@@ -903,6 +978,26 @@ fun readDelegatorBuckets(): [UFix64] {
     )
     Test.expect(r, Test.beSucceeded())
     return r.returnValue! as! [UFix64]
+}
+
+access(all)
+fun readSlotBuckets(slotId: UInt64): [UFix64] {
+    let r = Test.executeScript(
+        Test.readFile("../../cadence/test/helpers/get_slot_by_id.cdc"),
+        [slotId]
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! [UFix64]
+}
+
+access(all)
+fun readDelegatorSetSummary(): {String: AnyStruct} {
+    let r = Test.executeScript(
+        Test.readFile("../../cadence/test/helpers/get_delegator_set_summary.cdc"),
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! {String: AnyStruct}
 }
 
 access(all)

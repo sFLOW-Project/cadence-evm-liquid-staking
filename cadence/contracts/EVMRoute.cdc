@@ -50,16 +50,19 @@ access(all) contract EVMRoute {
     access(all) struct VaultConfigRead {
         access(all) let minRequestAmount: UInt256
         access(all) let isStakingPaused: Bool
+        access(all) let isUnstakingPaused: Bool
         access(all) let protocolFee: UInt256
         access(all) let slippageTolerance: UInt256
         init(
             minRequestAmount: UInt256,
             isStakingPaused: Bool,
+            isUnstakingPaused: Bool,
             protocolFee: UInt256,
             slippageTolerance: UInt256
         ) {
             self.minRequestAmount = minRequestAmount
             self.isStakingPaused = isStakingPaused
+            self.isUnstakingPaused = isUnstakingPaused
             self.protocolFee = protocolFee
             self.slippageTolerance = slippageTolerance
         }
@@ -174,7 +177,7 @@ access(all) contract EVMRoute {
         coa: &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress
     ): VaultConfigRead {
-        let CONFIG_RETURNDATA_LENGTH = 128
+        let CONFIG_RETURNDATA_LENGTH = 160
         let calldata = EVM.encodeABIWithSignature("getConfig()", [])
         let res = coa.dryCall(
             to: vault,
@@ -185,13 +188,16 @@ access(all) contract EVMRoute {
         assert(res.status == EVM.Status.successful, message: "getConfig call failed")
         let d = res.data
         assert(d.length >= CONFIG_RETURNDATA_LENGTH, message: "short getConfig returndata")
-        let pausedWord = self.abiWordUInt256(d, wordIndex: 1)
-        assert(pausedWord <= 1, message: "getConfig: invalid isStakingPaused encoding")
+        let stakingPausedWord = self.abiWordUInt256(d, wordIndex: 1)
+        assert(stakingPausedWord <= 1, message: "getConfig: invalid isStakingPaused encoding")
+        let unstakingPausedWord = self.abiWordUInt256(d, wordIndex: 2)
+        assert(unstakingPausedWord <= 1, message: "getConfig: invalid isUnstakingPaused encoding")
         return VaultConfigRead(
             minRequestAmount: self.abiWordUInt256(d, wordIndex: 0),
-            isStakingPaused: pausedWord == 1,
-            protocolFee: self.abiWordUInt256(d, wordIndex: 2),
-            slippageTolerance: self.abiWordUInt256(d, wordIndex: 3)
+            isStakingPaused: stakingPausedWord == 1,
+            isUnstakingPaused: unstakingPausedWord == 1,
+            protocolFee: self.abiWordUInt256(d, wordIndex: 3),
+            slippageTolerance: self.abiWordUInt256(d, wordIndex: 4)
         )
     }
 
@@ -390,6 +396,26 @@ access(all) contract EVMRoute {
         assert(res.status == EVM.Status.successful, message: "fulfillUnstakeRequestPartial failed")
     }
 
+    /// Zero-recovery fulfill when Cadence recovered no FLOW for a stuck receipt.
+    /// (`LSPVault.fulfillUnstakeRequestZero`).
+    access(all) fun fulfillUnstakeRequestZero(
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
+        vault: EVM.EVMAddress,
+        id: UInt256
+    ) {
+        let fdata = EVM.encodeABIWithSignature(
+            "fulfillUnstakeRequestZero(uint256)",
+            [id]
+        )
+        let res = coa.call(
+            to: vault,
+            data: fdata,
+            gasLimit: self.gasLimitFulfillUnstake,
+            value: EVM.Balance(attoflow: 0)
+        )
+        assert(res.status == EVM.Status.successful, message: "fulfillUnstakeRequestZero failed")
+    }
+
     init() {
         self.ratioScaleFactor = 1_000_000_000_000_000_000
         self.gasLimitViewCount = 50_000
@@ -437,6 +463,21 @@ access(all) contract EVMRoute {
         assert(res.status == EVM.Status.successful, message: "setIsStakingPaused call failed")
     }
 
+    access(account) fun setUnstakingPaused(
+        coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
+        vault: EVM.EVMAddress,
+        paused: Bool
+    ) {
+        let data = EVM.encodeABIWithSignature("setIsUnstakingPaused(bool)", [paused])
+        let res = coa.call(
+            to: vault,
+            data: data,
+            gasLimit: self.gasLimitAdminSetter,
+            value: EVM.Balance(attoflow: 0)
+        )
+        assert(res.status == EVM.Status.successful, message: "setIsUnstakingPaused call failed")
+    }
+
     access(account) fun setMinRequestAmount(
         coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
@@ -471,17 +512,19 @@ access(all) contract EVMRoute {
         vault: EVM.EVMAddress,
         minRequestAmount: UInt256,
         isStakingPaused: Bool,
+        isUnstakingPaused: Bool,
         protocolFee: UInt256,
         slippageTolerance: UInt256
     ) {
         let cfg = VaultConfigRead(
             minRequestAmount: minRequestAmount,
             isStakingPaused: isStakingPaused,
+            isUnstakingPaused: isUnstakingPaused,
             protocolFee: protocolFee,
             slippageTolerance: slippageTolerance
         )
         let data = EVM.encodeABIWithSignature(
-            "updateConfig((uint256,bool,uint256,uint256))",
+            "updateConfig((uint256,bool,bool,uint256,uint256))",
             [cfg]
         )
         let res = coa.call(
