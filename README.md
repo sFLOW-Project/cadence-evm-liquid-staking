@@ -15,7 +15,7 @@ Three moving parts:
 | Actor / object | Owns or controls |
 |----------------|------------------|
 | **Protocol Cadence account** | Deployed `sFlowToken`, `LiquidStaking`, `LiquidStakingConfig`, `EVMRoute`, **`RelayerRouter`**; `NodeDelegator`, withdraw pool, treasury FLOW vault. Bootstrap creates COAs under e.g. `/storage/liquid_staking_protocol_router_coa` (router) and `/storage/liquid_staking_protocol_governance_coa` (governance); **phase 3** moves the router COA **into** `RelayerRouter` deployment. That router COA’s EVM address is **`ROUTER_COA`** on `LSPVault` (fulfill / `syncRate`). **`RelayerRouter`** exposes **permissionless** `access(all)` entrypoints on-chain (no capability publish needed). |
-| **Admin account (post-handoff)** | **`LiquidStakingConfig.Admin`** at `LiquidStakingConfig.AdminStoragePath`, embedding the **governance COA** used for `LSPVault` “owner” style updates and **`EVMRoute`** admin helpers (`setStakingPaused`, fee/min sync, etc.). Use **`cadence/transactions/protocol/transfer_admin.cdc`** to move `Admin` between Cadence accounts. |
+| **Admin account (post-handoff)** | **`LiquidStakingConfig.Admin`** at `LiquidStakingConfig.AdminStoragePath`, embedding the **governance COA** used for `LSPVault` “owner” style updates and **`EVMRoute`** admin helpers (`setStakingPaused`, `setUnstakingPaused`, fee/min sync, etc.). Use **`cadence/transactions/protocol/transfer_admin.cdc`** to move `Admin` between Cadence accounts. |
 | **Users** | On EVM: EOAs and approvals toward `LSPVault`. On Cadence: **`cadence/transactions/user/`** (`stake`, `unstake`, `withdraw`) for direct flows, tests, and custom clients. |
 | **Relayer** | Any account that pays fees and passes **batch request ids** (from indexing or polling) into **`cadence/transactions/relayer/*.cdc`** — no `LiquidStakingConfig.Admin` access required. |
 
@@ -163,7 +163,9 @@ The **protocol** Cadence account runs **`protocol-deploy.sh`**, which sends **`c
 **Governance handoff:** move **`LiquidStakingConfig.Admin`** with **`cadence/transactions/protocol/transfer_admin.cdc`**. **`cadence/transactions/admin/register_delegator.cdc`** registers the staking node (requires **`Admin`**).
 
 **Config (Cadence + EVM alignment)**  
-Governance uses **`cadence/transactions/admin/`** (pause, min stake, fee queue/activate, delay, fee receiver, etc.); the **`Admin`** methods call **`EVMRoute`** so Cadence and vault stay aligned where implemented.
+Governance uses **`cadence/transactions/admin/`** (pause, min stake, fee queue/activate, delay, fee receiver, etc.); the **`Admin`** methods call **`EVMRoute`** so Cadence and vault stay aligned where implemented.  
+- **`cadence/transactions/admin/set_staking_paused.cdc`** — pauses/unpauses staking on both Cadence and EVM.  
+- **`cadence/transactions/admin/set_unstaking_paused.cdc`** — pauses/unpauses unstaking on both Cadence and EVM (used before slashing-loss realization to prevent new fixed-receipt claims).
 
 **Scripts**  
 - **`cadence/scripts/staking/get_flow_for_sFlow.cdc`** / **`get_sFlow_for_flow.cdc`** — exchange-rate style views.  

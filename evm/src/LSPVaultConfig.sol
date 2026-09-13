@@ -55,6 +55,11 @@ abstract contract LSPVaultConfig is Ownable, ILSPVaultConfig {
         _config.isStakingPaused = _isStakingPaused;
     }
 
+    function setIsUnstakingPaused(bool _isUnstakingPaused) external onlyOwner {
+        emit IsUnstakingPausedUpdated(_config.isUnstakingPaused, _isUnstakingPaused);
+        _config.isUnstakingPaused = _isUnstakingPaused;
+    }
+
     function setProtocolFee(uint256 _protocolFee) external onlyOwner {
         if (_protocolFee > MAX_PROTOCOL_FEE) {
             revert ProtocolFeeTooHigh(MAX_PROTOCOL_FEE, _protocolFee);

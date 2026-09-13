@@ -33,7 +33,7 @@ contract LSPVaultTest is Test {
         vm.prank(adminCOA);
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+                minRequestAmount: 0.01 ether, isStakingPaused: false, isUnstakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
             })
         );
 
@@ -57,7 +57,7 @@ contract LSPVaultTest is Test {
         vm.prank(adminCOA);
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16
+                minRequestAmount: 0.01 ether, isStakingPaused: true, isUnstakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
             })
         );
         vm.prank(staker);
@@ -143,6 +143,18 @@ contract LSPVaultTest is Test {
         assertEq(sFlow.balanceOf(address(lspVault)), amount);
         assertEq(flowReceipt.balanceOf(staker), expectedNormalizedFlow);
         assertEq(lspVault.receipts(requestId, ILSPVault.ReceiptType.UNSTAKE), expectedNormalizedFlow);
+    }
+
+    function testRequestUnstakeRevertsIfUnstakingIsPaused() public {
+        vm.prank(adminCOA);
+        lspVault.setIsUnstakingPaused(true);
+
+        sFlow.mint(staker, 1 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 1 ether);
+        vm.expectRevert(ILSPVault.UnstakingPaused.selector);
+        lspVault.requestUnstake(1 ether);
+        vm.stopPrank();
     }
 
     function testFulfillStakeRequestRevertsIfRequestIsNotPending() public {
@@ -432,7 +444,7 @@ contract LSPVaultTest is Test {
         vm.prank(adminCOA);
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16
+                minRequestAmount: 0.01 ether, isStakingPaused: true, isUnstakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
             })
         );
         assertEq(lspVault.getConfig().isStakingPaused, true);
@@ -444,7 +456,7 @@ contract LSPVaultTest is Test {
         vm.prank(adminCOA);
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17, slippageTolerance: 1e16
+                minRequestAmount: 0.01 ether, isStakingPaused: false, isUnstakingPaused: false, protocolFee: 2e17, slippageTolerance: 1e16
             })
         );
         assertEq(lspVault.getConfig().protocolFee, 2e17);
@@ -455,7 +467,7 @@ contract LSPVaultTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.ProtocolFeeTooHigh.selector, 2e17, 2e17 + 1));
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 2e17 + 1, slippageTolerance: 1e16
+                minRequestAmount: 0.01 ether, isStakingPaused: false, isUnstakingPaused: false, protocolFee: 2e17 + 1, slippageTolerance: 1e16
             })
         );
     }
@@ -522,7 +534,7 @@ contract LSPVaultTest is Test {
         vm.expectRevert(ILSPVaultConfig.MinRequestAmountMustBePositive.selector);
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+                minRequestAmount: 0, isStakingPaused: false, isUnstakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
             })
         );
     }
@@ -533,7 +545,7 @@ contract LSPVaultTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ILSPVaultConfig.MinRequestAmountNotCadenceRepresentable.selector, dusty));
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: dusty, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+                minRequestAmount: dusty, isStakingPaused: false, isUnstakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
             })
         );
     }
@@ -544,6 +556,14 @@ contract LSPVaultTest is Test {
         emit ILSPVaultConfig.IsStakingPausedUpdated(false, true);
         lspVault.setIsStakingPaused(true);
         assertEq(lspVault.getConfig().isStakingPaused, true);
+    }
+
+    function testSetIsUnstakingPaused() public {
+        vm.prank(adminCOA);
+        vm.expectEmit(true, true, false, true);
+        emit ILSPVaultConfig.IsUnstakingPausedUpdated(false, true);
+        lspVault.setIsUnstakingPaused(true);
+        assertEq(lspVault.getConfig().isUnstakingPaused, true);
     }
 
     function testSetProtocolFee() public {
@@ -658,7 +678,7 @@ contract LSPVaultTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, staker));
         lspVault.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0.01 ether, isStakingPaused: true, protocolFee: 0, slippageTolerance: 1e16
+                minRequestAmount: 0.01 ether, isStakingPaused: true, isUnstakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
             })
         );
     }
@@ -850,7 +870,7 @@ contract LSPVaultTest is Test {
         vm.prank(adminCOA);
         v.updateConfig(
             ILSPVaultConfig.Config({
-                minRequestAmount: 0.01 ether, isStakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
+                minRequestAmount: 0.01 ether, isStakingPaused: false, isUnstakingPaused: false, protocolFee: 0, slippageTolerance: 1e16
             })
         );
 
@@ -1165,6 +1185,32 @@ contract LSPVaultTest is Test {
         lspVault.fulfillUnstakeRequestPartial{value: 50 ether}(reqId);
 
         assertEq(lspVault.pendingWithdrawals(staker), 50 ether);
+    }
+
+    function testFulfillUnstakeRequestZero_clearsConfirmedRequest() public {
+        sFlow.mint(staker, 50 ether);
+        vm.startPrank(staker);
+        sFlow.approve(address(lspVault), 50 ether);
+        uint256 reqId = lspVault.requestUnstake(50 ether);
+        vm.stopPrank();
+
+        vm.prank(routerCOA);
+        lspVault.withdrawPendingUnstakeSFlow(reqId);
+        vm.prank(routerCOA);
+        lspVault.confirmUnstakeRequest(reqId, 50 ether, 1);
+
+        vm.expectEmit(true, true, false, true);
+        emit ILSPVault.UnstakeFulfilled(reqId, staker, 0);
+
+        vm.prank(routerCOA);
+        lspVault.fulfillUnstakeRequestZero(reqId);
+
+        assertEq(lspVault.pendingWithdrawals(staker), 0);
+        assertEq(flowReceipt.balanceOf(staker), 0);
+
+        (ILSPVault.RequestStatus status,,, uint256 flowAmount,,) = lspVault.unstakeRequests(reqId);
+        assertEq(uint256(status), uint256(ILSPVault.RequestStatus.FULFILLED));
+        assertEq(flowAmount, 0);
     }
 
     function testStakeAndUnstakeRequestIds_useDistinctDomains() public {

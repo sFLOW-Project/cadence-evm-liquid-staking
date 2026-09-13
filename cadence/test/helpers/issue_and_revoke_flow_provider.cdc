@@ -1,7 +1,7 @@
 import "FungibleToken"
 import "FlowToken"
 
-/// Minimal reproduction of the SFL-05 capability lifecycle used by relayer transactions.
+/// Minimal reproduction of the capability lifecycle used by relayer transactions.
 /// Issues a temporary storage capability on /storage/flowTokenVault, immediately deletes its
 /// controller, and asserts the account's storage controller count is unchanged.
 transaction {
@@ -13,7 +13,7 @@ transaction {
 
         // In the real relayer transactions the capability is wrapped in a ScopedFTProvider here
         // and destroyed before the controller is deleted. Deleting the controller is what
-        // prevents storage-capability-controller leakage (SFL-05).
+        // prevents storage-capability-controller leakage.
         let controller = signer.capabilities.storage.getController(byCapabilityID: providerCap.id)
             ?? panic("Could not find issued capability controller")
         controller.delete()

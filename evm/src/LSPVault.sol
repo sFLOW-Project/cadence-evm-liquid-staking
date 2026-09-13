@@ -179,6 +179,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
      * @custom:throws AmountNotCadenceRepresentable if `_amount` is not a multiple of `CADENCE_DECIMAL_SCALE` (1e10).
      */
     function requestUnstake(uint256 _amount) external returns (uint256) {
+        if (_config.isUnstakingPaused) revert UnstakingPaused();
+
         _requireCadenceRepresentable(_amount);
 
         uint256 flowEquivalent = _flowFromSFlow(_amount);
@@ -361,6 +363,20 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
             revert UnstakeFulfillmentAmountInvalid(req.flowAmount, msg.value);
         }
         _fulfillUnstakeRequest(_id, msg.value);
+    }
+
+    /**
+     * Restricted to COA. Zero-recovery fulfill when Cadence could not recover any FLOW
+     * for a stuck receipt (`RelayerRouter.evictStuckReceipt`). Burns the unstake receipt
+     * and credits zero FLOW so the request can be cleared.
+     * @param _id id of the unstake request.
+     */
+    function fulfillUnstakeRequestZero(uint256 _id) external onlyRouterCOA {
+        UnstakeRequest storage req = unstakeRequests[_id];
+        if (req.status != RequestStatus.UNSTAKE_CONFIRMED) {
+            revert InvalidRequest();
+        }
+        _fulfillUnstakeRequest(_id, 0);
     }
 
     function _fulfillUnstakeRequest(uint256 _id, uint256 credited) private {

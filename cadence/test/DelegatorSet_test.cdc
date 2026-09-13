@@ -105,10 +105,11 @@ fun testNodeExitThenUnstakeAllocatesExitingWithoutNewRequest() {
 
 access(all)
 fun testSecondDelegatorReceivesNewStakesAfterRotation() {
-    // Mark slot 0 draining, add slot 1 on node B, set deposit target.
-    markDraining(0)
+    // Add slot 1 on node B first, then drain slot 0. Draining the last active
+    // slot is disallowed because it would lock staking until a replacement is
+    // registered, so slot 1 must exist before slot 0 can be marked draining.
     registerDelegator(nodeB, 10.0)
-    setDepositTarget(1)
+    markDraining(0)
 
     let summary = readSetSummary()
     Test.assertEqual(2, summary["slotCount"]! as! Int)
@@ -147,12 +148,15 @@ fun testUnstakePrefersDrainingExitingOverActiveNewRequest() {
 
 access(all)
 fun testUnstakeAllocatesFromEarliestExitingEpochFirst() {
-    // SFL-06: within the draining group, allocation must order slots by earliest
+    // Within the draining group, allocation must order slots by earliest
     // unlock epoch (not dictionary key order). Register two fresh draining slots
     // whose slot IDs are the opposite of maturity order: slot 3 has unstaked
     // (current-epoch) capacity while slot 2 has only unstaking (next-epoch).
+    // A fourth active slot is registered so that draining slots 2 and 3 does not
+    // leave the set with no active slot, which markDraining() now forbids.
     registerDelegator(nodeA, 100.0)
     registerDelegator(nodeB, 100.0)
+    registerDelegator(nodeA, 100.0)
     markDraining(2)
     markDraining(3)
 

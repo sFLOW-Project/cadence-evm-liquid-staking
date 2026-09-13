@@ -31,7 +31,7 @@ transaction(unstakeRequestIds: [UInt256], maxBridgeFlowFee: UFix64) {
         destroy scopedProvider
 
         // Delete the temporary capability controller so repeated relayer calls do not leak
-        // persistent storage controllers (SFL-05).
+        // persistent storage controllers.
         let controller = signer.capabilities.storage.getController(byCapabilityID: providerCap.id)
             ?? panic("Could not find issued FlowToken provider capability controller")
         controller.delete()
