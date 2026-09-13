@@ -1,6 +1,6 @@
 import Test
 
-/// SFL-05: repeated relayer capability issuance must not leak storage capability controllers.
+/// Repeated relayer capability issuance must not leak storage capability controllers.
 /// This test verifies the revoke pattern used by handle_stakes.cdc and initiate_unstakes.cdc.
 
 access(all) let protocolAddress: Address = 0x0000000000000007

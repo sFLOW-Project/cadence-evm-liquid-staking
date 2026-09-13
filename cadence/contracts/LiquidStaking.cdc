@@ -21,7 +21,7 @@ access(all) contract LiquidStaking {
     access(all) var totalFlowReceiptsOutstanding: UFix64
 
     /// Permanently locked protocol-owned sFLOW. Seeded once with matching FLOW backing so
-    /// `totalSupply` cannot be burned down to a UFix64 dust amount (SFL-01).
+    /// `totalSupply` cannot be burned down to a UFix64 dust amount.
     access(all) let protocolOwnedSFlowFloor: UFix64
     access(self) let protocolOwnedSFlow: @sFlowToken.Vault
 

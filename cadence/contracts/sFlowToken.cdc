@@ -195,13 +195,13 @@ access(all) contract sFlowToken: FungibleToken {
 
         let minter <- create Minter()
         self.account.storage.save(<-minter, to: self.minterStoragePath)
-        
+
         // Create the Vault with the total supply of tokens and save it in storage
         let vault <- create Vault(balance: self.totalSupply)
         self.account.storage.save(<-vault, to: self.tokenVaultPath)
 
         // Create public capabilities matching the FTVaultData advertised types so wallets
-        // can borrow the composite-restricted receiver and metadata references (SFL-04).
+        // can borrow the composite-restricted receiver and metadata references.
         self.account.capabilities.publish(
             self.account.capabilities.storage.issue<&{FungibleToken.Receiver, FungibleToken.Vault}>(self.tokenVaultPath),
             at: self.tokenReceiverPath

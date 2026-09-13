@@ -52,7 +52,7 @@ access(all) contract LiquidStakingConfig {
     )
     access(all) event UnstakeClaimWithdrawn(receiptUuid: UInt64, flowAmount: UFix64)
 
-    /// Pair used to order exiting slots by earliest unlock epoch (SFL-06).
+    /// Pair used to order exiting slots by earliest unlock epoch.
     access(all) struct SlotEpoch {
         access(all) let slotId: UInt64
         access(all) let epoch: UInt64
@@ -246,6 +246,15 @@ access(all) contract LiquidStakingConfig {
             assert(
                 slot.status == LiquidStakingConfig.slotStatusActive,
                 message: "Slot \(slotId) is not Active"
+            )
+
+            // Draining the last active slot would clear the deposit target and lock
+            // staking until an admin registers a replacement. Require at least one
+            // other active slot so new stakes can keep flowing.
+            let activeIds = self.slotIdsWithStatus(LiquidStakingConfig.slotStatusActive)
+            assert(
+                activeIds.length > 1,
+                message: "Cannot drain slot \(slotId): it is the last active slot; register a replacement first"
             )
 
             slot.setStatus(LiquidStakingConfig.slotStatusDraining)

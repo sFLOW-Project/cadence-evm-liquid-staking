@@ -2,7 +2,7 @@ import "FungibleToken"
 import "FlowToken"
 import "LiquidStaking"
 
-/// One-time SFL-01 seed: lock `protocolOwnedSFlowFloor` sFLOW with matching FLOW backing.
+/// One-time seed: lock `protocolOwnedSFlowFloor` sFLOW with matching FLOW backing.
 /// Run after `register_protocol_delegator.cdc` and before user / relayer stakes.
 transaction {
     let payment: @FlowToken.Vault

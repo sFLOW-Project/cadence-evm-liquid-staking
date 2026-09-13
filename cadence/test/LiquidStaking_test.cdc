@@ -874,6 +874,26 @@ fun testUnstakeRevertsWhenUnstakingPaused() {
 }
 
 access(all)
+fun testMarkDrainingLastActiveSlotReverts() {
+    // Clean up receipts from earlier shared-state tests.
+    advanceEpoch(3)
+    withdrawAllReceipts(userAccount)
+
+    // Only slot 0 is active. Draining it must be rejected so staking stays available.
+    let drainTx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/mark_delegator_draining.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [0 as UInt64],
+    ))
+    Test.expect(drainTx, Test.beFailed())
+    Test.assert(
+        errorIncludes(drainTx.error?.message, substring: "last active slot"),
+        message: "draining the last active slot must be rejected"
+    )
+}
+
+access(all)
 fun testMarkDrainingRequestsUnstakingOfRemainingPrincipal() {
     // Clean up receipts from earlier shared-state tests.
     advanceEpoch(3)
