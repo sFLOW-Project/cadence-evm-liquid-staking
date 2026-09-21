@@ -266,10 +266,8 @@ access(all) contract LiquidStakingConfig {
 
             slot.setStatus(LiquidStakingConfig.slotStatusDraining)
 
-            // Begin unwinding any committed/staked principal that is not already
-            // exiting, so the draining slot can wind down and eventually be retired.
             let info = slot.info()
-            let remaining = info.tokensCommitted + info.tokensStaked
+            let remaining = LiquidStakingConfig.freeStakeCapacity(info: info)
             if remaining > 0.0 {
                 slot.borrowDelegator().requestUnstaking(amount: remaining)
             }
