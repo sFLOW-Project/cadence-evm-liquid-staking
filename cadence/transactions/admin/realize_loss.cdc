@@ -11,10 +11,7 @@ transaction(amount: UFix64) {
         LiquidStaking.realizeLoss(amount: amount, admin: admin)
 
         if LiquidStaking.totalFlowStaked > 0.0 {
-            RelayerRouter.syncRate(
-                rateScaled: LiquidStaking.flowPerSFlowScaled(),
-                admin: admin
-            )
+            RelayerRouter.syncBacking(admin: admin)
         }
     }
 }

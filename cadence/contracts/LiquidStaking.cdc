@@ -400,7 +400,7 @@ access(all) contract LiquidStaking {
     }
 
     /// Canonical FLOW-per-sFLOW rate at `EVMRoute.ratioScaleFactor` (1e18). Use this for
-    /// EVM `syncRate` and any protocol path. Token vaults stay `UFix64`; the *rate* does not.
+    /// EVM `syncBacking` and any protocol path. Token vaults stay `UFix64`; the *rate* does not.
     access(all) view fun flowPerSFlowScaled(): UInt256 {
         if self.totalFlowStaked == 0.0 {
             assert(

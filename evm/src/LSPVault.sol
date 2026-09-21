@@ -55,8 +55,8 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     bytes32 private constant STAKE_REQUEST_DOMAIN = keccak256("LSPVault.stakeRequest");
     bytes32 private constant UNSTAKE_REQUEST_DOMAIN = keccak256("LSPVault.unstakeRequest");
 
-    /// sFlow to Flow rate, starting with 1 to 1.
-    uint256 private _rate = ONE_ETHER;
+    uint256 public totalFlowStaked = ONE_ETHER;
+    uint256 public totalSFlowSupply = ONE_ETHER;
 
     modifier onlyRouterCOA() {
         if (msg.sender != ROUTER_COA) revert NotRouterCOA();
@@ -71,14 +71,12 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
         requestId = uint256(keccak256(abi.encode(UNSTAKE_REQUEST_DOMAIN, user, nonce)));
     }
 
-    /// @notice FLOW (wei) implied by `sFlowWei` at the current `syncRate` (same convention as Cadence `flowPerSFlow`).
     function _flowFromSFlow(uint256 sFlowWei) private view returns (uint256) {
-        return (sFlowWei * _rate) / PRECISION;
+        return (sFlowWei * totalFlowStaked) / totalSFlowSupply;
     }
 
-    /// @notice sFlow (wei) needed for `flowWei` at the current rate (inverse of `_flowFromSFlow`).
     function _sFlowFromFlow(uint256 flowWei) private view returns (uint256) {
-        return (flowWei * PRECISION) / _rate;
+        return (flowWei * totalSFlowSupply) / totalFlowStaked;
     }
 
     /// Cadence FLOW / sFLOW vaults are `UFix64` (8 decimals). EVM wei has 18; the lower 10 digits cannot be represented.
@@ -272,11 +270,11 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     //                       ROUTER COA functions                  //
     /////////////////////////////////////////////////////////////////
 
-    /// Restricted to COA function, which syncs sFlow/Flow rate on EVM side.
-    function syncRate(uint256 _newRate) external onlyRouterCOA {
-        if (_newRate == 0) revert InvalidRate();
-        emit RateUpdated(_rate, _newRate);
-        _rate = _newRate;
+    function syncBacking(uint256 _totalFlowStaked, uint256 _totalSFlowSupply) external onlyRouterCOA {
+        if (_totalFlowStaked == 0 || _totalSFlowSupply == 0) revert InvalidBacking();
+        emit BackingUpdated(_totalFlowStaked, _totalSFlowSupply);
+        totalFlowStaked = _totalFlowStaked;
+        totalSFlowSupply = _totalSFlowSupply;
     }
 
     /**
@@ -420,11 +418,11 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     /////////////////////////////////////////////////////////////////
 
     function getRate() external view returns (uint256) {
-        return _rate;
+        return (totalFlowStaked * ONE_ETHER) / totalSFlowSupply;
     }
 
     /**
-     * View-only quote: sFlow (wei) implied by a FLOW amount at the current rate (`getRate()`, same convention as Cadence `sFlowPerFlow` after `syncRate`).
+     * View-only quote: sFlow (wei) implied by a FLOW amount at the current rate (`getRate()`, same convention as Cadence `sFlowPerFlow` after `syncBacking`).
      * @param flowWei FLOW input in wei (18 decimals).
      */
     function getSFlowQuote(uint256 flowWei) external view returns (uint256 sFlowWei) {
@@ -432,7 +430,7 @@ contract LSPVault is LSPVaultConfig, ILSPVault {
     }
 
     /**
-     * View-only quote: FLOW (wei) implied by an sFlow amount at the current rate (`getRate()`, same convention as Cadence `flowPerSFlow` after `syncRate`).
+     * View-only quote: FLOW (wei) implied by an sFlow amount at the current rate (`getRate()`, same convention as Cadence `flowPerSFlow` after `syncBacking`).
      * @param sFlowWei sFlow input in wei (18 decimals).
      */
     function getFlowQuote(uint256 sFlowWei) external view returns (uint256 flowWei) {

@@ -55,7 +55,7 @@ interface ILSPVault is ILSPVaultConfig {
     error sFlowAmountTooLow(uint256 minAmountOut, uint256 sFlowAmount);
     error InvalidRouterCOA();
     error InvalidSFlowAddress();
-    error InvalidRate();
+    error InvalidBacking();
     error NotRequestOwner();
     error CantCancelRequestYet();
     error UnstakeFulfillmentAmountInvalid(uint256 confirmedAmount, uint256 fulfilledAmount);
@@ -69,7 +69,7 @@ interface ILSPVault is ILSPVaultConfig {
     event UnstakeFulfilled(uint256 indexed id, address indexed user, uint256 amount);
     event UnstakeCancelled(uint256 indexed id, address indexed user, uint256 amount);
     event WithdrawalClaimed(address indexed user, address indexed recipient, uint256 amount);
-    event RateUpdated(uint256 oldRate, uint256 newRate);
+    event BackingUpdated(uint256 totalFlowStaked, uint256 totalSFlowSupply);
 
     // Functions
     function requestStake() external payable returns (uint256);
@@ -83,7 +83,7 @@ interface ILSPVault is ILSPVaultConfig {
     function withdrawPendingStakeNative(uint256 _id) external returns (uint256 amount);
     function cancelStakeRequestSlippage(uint256 _id) external payable;
     function withdrawPendingUnstakeSFlow(uint256 _id) external returns (uint256 amount);
-    function syncRate(uint256 _newRate) external;
+    function syncBacking(uint256 _totalFlowStaked, uint256 _totalSFlowSupply) external;
     function getRate() external view returns (uint256);
     function getSFlowQuote(uint256 flowWei) external view returns (uint256 sFlowWei);
     function getFlowQuote(uint256 sFlowWei) external view returns (uint256 flowWei);

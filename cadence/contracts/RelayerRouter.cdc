@@ -294,11 +294,7 @@ access(all) contract RelayerRouter {
         )
 
         if LiquidStaking.totalFlowStaked > 0.0 {
-            EVMRoute.syncRate(
-                coa: coa,
-                vault: vaultAddr,
-                rateScaled: LiquidStaking.flowPerSFlowScaled()
-            )
+            self.syncBackingInternal(coa: coa)
         }
 
         emit StuckReceiptEvicted(
@@ -309,12 +305,16 @@ access(all) contract RelayerRouter {
         )
     }
 
-    access(all) fun syncRate(rateScaled: UInt256, admin: &LiquidStakingConfig.Admin) {
-        let _ = admin
-        EVMRoute.syncRate(
-            coa: self.borrowCoa(),
+    access(all) fun syncBacking(admin: &LiquidStakingConfig.Admin) {
+        self.syncBackingInternal(coa: self.borrowCoa())
+    }
+
+    access(self) fun syncBackingInternal(coa: auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount) {
+        EVMRoute.syncBacking(
+            coa: coa,
             vault: self.vaultAddr(),
-            rateScaled: rateScaled
+            totalFlowStakedScaled: EVMRoute.tokenUFix64ToScaledUInt256(LiquidStaking.totalFlowStaked),
+            totalSFlowSupplyScaled: EVMRoute.tokenUFix64ToScaledUInt256(sFlowToken.totalSupply)
         )
     }
 
@@ -323,11 +323,7 @@ access(all) contract RelayerRouter {
 
         LiquidStaking.compoundRewards()
 
-        EVMRoute.syncRate(
-            coa: coa,
-            vault: self.vaultAddr(),
-            rateScaled: LiquidStaking.flowPerSFlowScaled()
-        )
+        self.syncBackingInternal(coa: coa)
     }
 
     access(all) fun handleStakes(

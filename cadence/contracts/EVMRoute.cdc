@@ -295,19 +295,23 @@ access(all) contract EVMRoute {
         assert(fulfillRes.status == EVM.Status.successful, message: "fulfillStakeRequest failed")
     }
 
-    access(all) fun syncRate(
+    access(all) fun syncBacking(
         coa: auth(EVM.Call) &EVM.CadenceOwnedAccount,
         vault: EVM.EVMAddress,
-        rateScaled: UInt256
+        totalFlowStakedScaled: UInt256,
+        totalSFlowSupplyScaled: UInt256
     ) {
-        let data = EVM.encodeABIWithSignature("syncRate(uint256)", [rateScaled])
+        let data = EVM.encodeABIWithSignature(
+            "syncBacking(uint256,uint256)",
+            [totalFlowStakedScaled, totalSFlowSupplyScaled]
+        )
         let result = coa.call(
             to: vault,
             data: data,
             gasLimit: self.gasLimitSyncRate,
             value: EVM.Balance(attoflow: 0)
         )
-        assert(result.status == EVM.Status.successful, message: "syncRate call failed")
+        assert(result.status == EVM.Status.successful, message: "syncBacking call failed")
     }
 
     access(all) fun withdrawPendingUnstakeSFlow(

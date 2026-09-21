@@ -38,7 +38,7 @@ contract LSPVaultTest is Test {
         );
 
         vm.prank(routerCOA);
-        lspVault.syncRate(1 ether);
+        lspVault.syncBacking(1 ether, 1 ether);
     }
 
     function _stakeRequestId(address user, uint256 nonce) internal pure returns (uint256) {
@@ -99,7 +99,7 @@ contract LSPVaultTest is Test {
 
     function testRequestUnstakeSucceedsWhenSFlowSmallButFlowEquivalentMeetsMin() public {
         vm.prank(routerCOA);
-        lspVault.syncRate(2 ether);
+        lspVault.syncBacking(2 ether, 1 ether);
 
         sFlow.mint(staker, 0.005 ether);
         vm.startPrank(staker);
@@ -112,7 +112,7 @@ contract LSPVaultTest is Test {
 
     function testRequestUnstakeRevertsWhenFlowEquivalentBelowMinWithRateAboveOne() public {
         vm.prank(routerCOA);
-        lspVault.syncRate(2 ether);
+        lspVault.syncBacking(2 ether, 1 ether);
 
         sFlow.mint(staker, 0.004 ether);
         vm.startPrank(staker);
@@ -126,7 +126,7 @@ contract LSPVaultTest is Test {
         // Rate 1e18+1 wei makes flowEquivalent = 1e18+1 wei for 1 sFlow.
         // The +1 wei is below CADENCE_DECIMAL_SCALE (1e10) and must be discarded from the receipt.
         vm.prank(routerCOA);
-        lspVault.syncRate(1 ether + 1);
+        lspVault.syncBacking(1 ether + 1, 1 ether);
 
         uint256 amount = 1 ether;
         sFlow.mint(staker, amount);
@@ -383,7 +383,7 @@ contract LSPVaultTest is Test {
 
     function testCancelUnstakeRequest_burnsFlowDenominatedReceiptWhenRateAboveOne() public {
         vm.prank(routerCOA);
-        lspVault.syncRate(2 ether);
+        lspVault.syncBacking(2 ether, 1 ether);
 
         sFlow.mint(staker, 10 ether);
         vm.startPrank(staker);
@@ -487,7 +487,7 @@ contract LSPVaultTest is Test {
         assertEq(freshVault.getConfig().minRequestAmount, MIN_REQUEST_AMOUNT);
 
         vm.prank(routerCOA);
-        freshVault.syncRate(1 ether);
+        freshVault.syncBacking(1 ether, 1 ether);
 
         vm.prank(staker);
         vm.expectRevert(
@@ -621,7 +621,7 @@ contract LSPVaultTest is Test {
         assertEq(freshVault.getConfig().minRequestAmount, MIN_REQUEST_AMOUNT, "min set atomically on deploy");
 
         vm.prank(routerCOA);
-        freshVault.syncRate(1 ether);
+        freshVault.syncBacking(1 ether, 1 ether);
 
         uint256 stakeAmount = 100 ether;
         vm.prank(staker);
@@ -640,9 +640,9 @@ contract LSPVaultTest is Test {
         assertEq(sFlow.balanceOf(staker), minAmountOut);
     }
 
-    function testSyncRate() public {
+    function testSyncBacking() public {
         vm.prank(routerCOA);
-        lspVault.syncRate(2 ether);
+        lspVault.syncBacking(2 ether, 1 ether);
         assertEq(lspVault.getRate(), 2 ether);
     }
 
@@ -667,7 +667,7 @@ contract LSPVaultTest is Test {
         assertEq(lspVault.getSFlowQuote(1 ether), 1 ether);
 
         vm.prank(routerCOA);
-        lspVault.syncRate(2 ether);
+        lspVault.syncBacking(2 ether, 1 ether);
 
         assertEq(lspVault.getFlowQuote(1 ether), 2 ether);
         assertEq(lspVault.getSFlowQuote(2 ether), 1 ether);
@@ -683,18 +683,18 @@ contract LSPVaultTest is Test {
         );
     }
 
-    function testSyncRateRevertsIfNotOwner() public {
+    function testSyncBackingRevertsIfNotOwner() public {
         vm.prank(staker);
         vm.expectRevert(abi.encodeWithSelector(ILSPVault.NotRouterCOA.selector));
-        lspVault.syncRate(2 ether);
+        lspVault.syncBacking(2 ether, 1 ether);
     }
 
-    function testSyncRate_revertsIfZeroRate() public {
+    function testSyncBacking_revertsIfZeroBacking() public {
         assertEq(lspVault.getRate(), 1 ether);
 
         vm.prank(routerCOA);
-        vm.expectRevert(ILSPVault.InvalidRate.selector);
-        lspVault.syncRate(0);
+        vm.expectRevert(ILSPVault.InvalidBacking.selector);
+        lspVault.syncBacking(0, 1 ether);
 
         assertEq(lspVault.getRate(), 1 ether);
     }
@@ -875,7 +875,7 @@ contract LSPVaultTest is Test {
         );
 
         vm.prank(address(badRouter));
-        v.syncRate(1 ether);
+        v.syncBacking(1 ether, 1 ether);
 
         vm.prank(staker);
         uint256 reqId = v.requestStake{value: 5 ether}();

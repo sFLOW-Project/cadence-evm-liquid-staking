@@ -907,9 +907,6 @@ access(all) contract LiquidStakingConfig {
             LiquidStakingConfig.borrowSet().setDepositTarget(slotId: slotId)
         }
 
-        /// Test stub: no EVM mirror exists in `flow test`, so rate sync is a no-op.
-        access(all) fun syncRate(rateScaled: UInt256) { let _ = rateScaled }
-
         access(all) fun retireSlot(slotId: UInt64) {
             LiquidStakingConfig.borrowSet().retireSlot(slotId: slotId)
         }
