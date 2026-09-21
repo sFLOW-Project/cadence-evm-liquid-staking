@@ -17,8 +17,9 @@ access(all) contract LiquidStaking {
     access(all) var totalFlowStaked: UFix64
 
     /// Total FLOW amount currently locked in outstanding `FlowReceipt` resources.
-    /// Used to block `realizeLoss` while fixed-receipt claims exist.
     access(all) var totalFlowReceiptsOutstanding: UFix64
+
+    access(all) var outstandingLossFactor: UFix64
 
     /// Permanently locked protocol-owned sFLOW. Seeded once with matching FLOW backing so
     /// `totalSupply` cannot be burned down to a UFix64 dust amount.
@@ -43,10 +44,12 @@ access(all) contract LiquidStaking {
     access(all) resource FlowReceipt {
         access(all) let amount: UFix64
         access(all) let unlockEpoch: UInt64
+        access(all) let lossFactorAtCreation: UFix64
 
-        init(amount: UFix64, unlockEpoch: UInt64) {
+        init(amount: UFix64, unlockEpoch: UInt64, lossFactorAtCreation: UFix64) {
             self.amount = amount
             self.unlockEpoch = unlockEpoch
+            self.lossFactorAtCreation = lossFactorAtCreation
         }
     }
 
@@ -118,6 +121,11 @@ access(all) contract LiquidStaking {
             LiquidStakingConfig.isUnstakingPaused == false: "Unstaking is paused"
         }
 
+        assert(
+            self.totalFlowStaked <= self.actualDelegatorBacking(),
+            message: "Unstaking is blocked until reconciled: totalFlowStaked \(self.totalFlowStaked) exceeds actual backing \(self.actualDelegatorBacking())"
+        )
+
         let sFlowAmount = from.balance
         let flowAmount = self.calcFlowFromSFlow(sFlowAmount: sFlowAmount)
         assert(
@@ -127,14 +135,14 @@ access(all) contract LiquidStaking {
 
         sFlowToken.burnTokens(from: <-from)
 
-        // Manager: reserve / request FLOW across DelegatorSet slots
         let allocation = LiquidStakingConfig.requestWithdrawFromStaked(amount: flowAmount)
 
         self.totalFlowStaked = self.totalFlowStaked - flowAmount
 
         let receipt <- create FlowReceipt(
             amount: flowAmount,
-            unlockEpoch: allocation.unlockEpoch
+            unlockEpoch: allocation.unlockEpoch,
+            lossFactorAtCreation: self.outstandingLossFactor
         )
         self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding + flowAmount
         LiquidStakingConfig.bindWithdrawClaim(
@@ -155,66 +163,67 @@ access(all) contract LiquidStaking {
     /// Cash out a matured `FlowReceipt` from the manager's unstaked buckets.
     access(all) fun withdraw(receipt: @FlowReceipt): @FlowToken.Vault {
         pre {
-            /// Setting unstakeUnlockEpochDelay allows admin to apply delay to the currently pending requests
             FlowEpoch.currentEpochCounter >= receipt.unlockEpoch + LiquidStakingConfig.unstakeUnlockEpochDelay:
                 "Unstake not unlocked: epoch \(FlowEpoch.currentEpochCounter) < unlock \(receipt.unlockEpoch) + delay \(LiquidStakingConfig.unstakeUnlockEpochDelay)"
         }
 
-        emit UnstakeFulfilled(id: receipt.uuid, flowAmount: receipt.amount)
-
-        let flowVault <- LiquidStakingConfig.withdrawFromUnstaked(
+        let effective = self.effectiveReceiptAmount(receipt: &receipt as &FlowReceipt)
+        let flowVault <- LiquidStakingConfig.withdrawFromUnstakedPartial(
             receiptUuid: receipt.uuid,
-            amount: receipt.amount
+            claimAmount: receipt.amount,
+            maxWithdraw: effective
+        )
+        assert(
+            flowVault.balance == effective,
+            message: "Insufficient unstaked FLOW for effective receipt amount \(effective)"
         )
 
-        self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding - receipt.amount
+        self.releaseOutstanding(amount: effective)
+        emit UnstakeFulfilled(id: receipt.uuid, flowAmount: effective)
         destroy receipt
 
         return <- flowVault
     }
 
-    /// Admin recovery withdraw for stuck EVM unstake receipts (`RelayerRouter.evictStuckReceipt`).
-    /// Differs from `withdraw`:
-    ///   - Honors base `receipt.unlockEpoch` only (ignores retroactive `unstakeUnlockEpochDelay`).
-    ///   - Pulls available unstaked FLOW across claim legs when buckets are short.
-    ///   - Credits `receipt.amount - withdrawAmount` back to `totalFlowStaked`.
-    /// The returned vault balance is the amount EVM must credit (`fulfillUnstakeRequestPartial`
-    /// when it is less than `receipt.amount`). The Cadence receipt is always destroyed.
     access(account) fun withdrawStuckReceipt(receipt: @FlowReceipt): @FlowToken.Vault {
         pre {
             FlowEpoch.currentEpochCounter >= receipt.unlockEpoch:
                 "Base unstake unlock epoch not reached: epoch \(FlowEpoch.currentEpochCounter) < \(receipt.unlockEpoch)"
         }
 
-        let requested = receipt.amount
+        return <- self.settleReceiptInternal(receipt: <-receipt)
+    }
+
+    access(all) fun settleNativeStuckReceipt(receipt: @FlowReceipt): @FlowToken.Vault {
+        pre {
+            FlowEpoch.currentEpochCounter >= receipt.unlockEpoch + LiquidStakingConfig.unstakeUnlockEpochDelay:
+                "Unstake not unlocked: epoch \(FlowEpoch.currentEpochCounter) < unlock \(receipt.unlockEpoch) + delay \(LiquidStakingConfig.unstakeUnlockEpochDelay)"
+        }
+
+        return <- self.settleReceiptInternal(receipt: <-receipt)
+    }
+
+    access(self) fun settleReceiptInternal(receipt: @FlowReceipt): @FlowToken.Vault {
+        let effective = self.effectiveReceiptAmount(receipt: &receipt as &FlowReceipt)
         let flowVault <- LiquidStakingConfig.withdrawFromUnstakedPartial(
             receiptUuid: receipt.uuid,
-            amount: requested
+            claimAmount: receipt.amount,
+            maxWithdraw: effective
         )
-        let withdrawAmount = flowVault.balance
+        let returned = flowVault.balance
 
-        emit UnstakeFulfilled(id: receipt.uuid, flowAmount: withdrawAmount)
-
-        self.totalFlowStaked = self.totalFlowStaked + (requested - withdrawAmount)
-        self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding - requested
-
+        self.totalFlowStaked = self.totalFlowStaked + (effective - returned)
+        self.releaseOutstanding(amount: effective)
+        emit UnstakeFulfilled(id: receipt.uuid, flowAmount: returned)
         destroy receipt
 
         return <- flowVault
     }
 
-    /// Governance-only loss realization. Permanently reduces `totalFlowStaked` when a
-    /// genuine, unrecoverable slashing loss has been confirmed. The loss is bounded by
-    /// the verifiable shortfall between `totalFlowStaked` and the actual FLOW currently
-    /// held across all protocol delegator slots (read from `FlowIDTableStaking`). This
-    /// prevents phantom backing and limits admin discretion. Caller must hold the
-    /// protocol `LiquidStakingConfig.Admin` resource.
     access(all) fun realizeLoss(amount: UFix64, admin: &LiquidStakingConfig.Admin) {
         pre {
             amount > 0.0: "Loss amount must be positive"
             amount <= self.totalFlowStaked: "Loss \(amount) exceeds totalFlowStaked \(self.totalFlowStaked)"
-            self.totalFlowReceiptsOutstanding == 0.0:
-                "Cannot realize loss while FlowReceipts are outstanding: \(self.totalFlowReceiptsOutstanding) FLOW"
         }
 
         let actualBacking = self.actualDelegatorBacking()
@@ -226,26 +235,20 @@ access(all) contract LiquidStaking {
             message: "Loss \(amount) exceeds verifiable shortfall \(maxLoss)"
         )
 
+        let lossRatio = amount / self.totalFlowStaked
+        if self.totalFlowReceiptsOutstanding > 0.0 {
+            self.outstandingLossFactor = self.outstandingLossFactor + (1.0 - self.outstandingLossFactor) * lossRatio
+            self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding * (1.0 - lossRatio)
+        }
+
         self.totalFlowStaked = self.totalFlowStaked - amount
         emit LossRealized(amount: amount, totalFlowStaked: self.totalFlowStaked)
-
-        /// If the loss wipes out all backing while sFLOW supply remains, the pool is
-        /// insolvent and `flowPerSFlowScaled` would panic. Do not push a stale rate
-        /// to EVM in that edge case; admin recapitalization is required before any
-        /// new operation can succeed.
-        if self.totalFlowStaked > 0.0 {
-            admin.syncRate(rateScaled: self.flowPerSFlowScaled())
-        }
     }
 
-    /// Sum of all FLOW currently in protocol delegator buckets (committed + staked +
-    /// unstaking + unstaked + rewarded), read directly from the canonical
-    /// `FlowIDTableStaking.DelegatorInfo` for each slot. Used to bound `realizeLoss`.
-    /// `tokensRequestedToUnstake` is excluded because it is already reflected in
-    /// `tokensCommitted` + `tokensStaked`; adding it again double-counts the same FLOW.
     access(self) fun actualDelegatorBacking(): UFix64 {
         var total = 0.0
         let snapshots = LiquidStakingConfig.getSlotSnapshots()
+        let feePercent = LiquidStakingConfig.protocolFeePercent
         var i = 0
         while i < snapshots.length {
             let s = snapshots[i]
@@ -258,19 +261,48 @@ access(all) contract LiquidStaking {
                 + info.tokensStaked
                 + info.tokensUnstaking
                 + info.tokensUnstaked
-                + info.tokensRewarded
+                + info.tokensRewarded * (1.0 - feePercent)
             i = i + 1
         }
         return total
     }
 
+    access(all) fun maxRealizableLoss(): UFix64 {
+        let actualBacking = self.actualDelegatorBacking()
+        return self.totalFlowStaked > actualBacking
+            ? self.totalFlowStaked - actualBacking
+            : 0.0
+    }
+
+    access(self) view fun effectiveReceiptAmount(receipt: &FlowReceipt): UFix64 {
+        if self.outstandingLossFactor >= 1.0 {
+            return 0.0
+        }
+        let oneMinusGlobal = 1.0 - self.outstandingLossFactor
+        let oneMinusCreation = 1.0 - receipt.lossFactorAtCreation
+        if oneMinusCreation == 0.0 {
+            return 0.0
+        }
+        return receipt.amount * oneMinusGlobal / oneMinusCreation
+    }
+
+    access(self) fun releaseOutstanding(amount: UFix64) {
+        if amount > self.totalFlowReceiptsOutstanding {
+            self.totalFlowReceiptsOutstanding = 0.0
+        } else {
+            self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding - amount
+        }
+    }
+
     access(all) struct FlowReceiptMetadata {
         access(all) let flowAmount: UFix64
         access(all) let unlockEpoch: UInt64
+        access(all) let lossFactorAtCreation: UFix64
 
-        init(flowAmount: UFix64, unlockEpoch: UInt64) {
+        init(flowAmount: UFix64, unlockEpoch: UInt64, lossFactorAtCreation: UFix64) {
             self.flowAmount = flowAmount
             self.unlockEpoch = unlockEpoch
+            self.lossFactorAtCreation = lossFactorAtCreation
         }
     }
 
@@ -291,9 +323,11 @@ access(all) contract LiquidStaking {
             )
             let flowAmount = receipt.amount
             let unlockEpoch = receipt.unlockEpoch
+            let lossFactorAtCreation = receipt.lossFactorAtCreation
             self.receiptMetas[uuid] = FlowReceiptMetadata(
                 flowAmount: flowAmount,
-                unlockEpoch: unlockEpoch
+                unlockEpoch: unlockEpoch,
+                lossFactorAtCreation: lossFactorAtCreation
             )
             self.receipts[uuid] <-! receipt
             emit FlowReceiptDeposited(
@@ -317,8 +351,6 @@ access(all) contract LiquidStaking {
             return <- receipt
         }
 
-        /// Each entry: `{ "uuid", "flowAmount", "unlockEpoch" }` (matches **`FlowReceipt`** fields).
-        /// Not `view`: building the result uses `append`, which mutates a local array in place.
         access(all) fun getFlowReceiptInfos(): [AnyStruct] {
             var infos: [AnyStruct] = []
             let keys = self.receiptMetas.keys
@@ -329,7 +361,8 @@ access(all) contract LiquidStaking {
                 infos.append({
                     "uuid": uuid,
                     "flowAmount": meta.flowAmount,
-                    "unlockEpoch": meta.unlockEpoch
+                    "unlockEpoch": meta.unlockEpoch,
+                    "lossFactorAtCreation": meta.lossFactorAtCreation
                 })
                 index = index + 1
             }
@@ -449,6 +482,7 @@ access(all) contract LiquidStaking {
         self.FlowReceiptCollectionPublicPath = /public/liquid_staking_flow_receipt_collection
         self.totalFlowStaked = 0.0
         self.totalFlowReceiptsOutstanding = 0.0
+        self.outstandingLossFactor = 0.0
         self.protocolOwnedSFlowFloor = 1.0
         self.protocolOwnedSFlow <- sFlowToken.createEmptyVault(vaultType: Type<@sFlowToken.Vault>())
         let pool <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>())

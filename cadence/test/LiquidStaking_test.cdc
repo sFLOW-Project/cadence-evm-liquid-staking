@@ -628,6 +628,13 @@ fun deployAll() {
         arguments: [],
     )
     Test.expect(err, Test.beNil())
+
+    err = Test.deployContract(
+        name: "RelayerRouter",
+        path: "../../cadence/test/fixtures/RelayerRouterStub.cdc",
+        arguments: [],
+    )
+    Test.expect(err, Test.beNil())
 }
 
 access(all)
@@ -816,7 +823,9 @@ fun testRealizeLossReducesTotalFlowStakedAndEmits() {
 }
 
 access(all)
-fun testRealizeLossRevertsWithOutstandingReceipt() {
+fun testRealizeLossAppliesToOutstandingReceipts() {
+    reconcileIfNeeded()
+
     let stakeAmount: UFix64 = 1_000.0
     Test.expect(Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/user_stake.cdc"),
@@ -825,8 +834,6 @@ fun testRealizeLossRevertsWithOutstandingReceipt() {
         arguments: [stakeAmount],
     )), Test.beSucceeded())
 
-    // Create a small outstanding FlowReceipt so totalFlowStaked stays high enough
-    // that a slash creates a verifiable shortfall while the receipt is live.
     Test.expect(Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
         authorizers: [userAccount.address],
@@ -834,27 +841,36 @@ fun testRealizeLossRevertsWithOutstandingReceipt() {
         arguments: [1.0],
     )), Test.beSucceeded())
 
-    // Slash to create a verifiable shortfall.
+    let outstandingBefore = readTotalFlowReceiptsOutstanding()
+    let totalBefore = readTotalFlowStaked()
+
     slash(mockNodeID, 1 as UInt32, 150.0)
 
-    // realizeLoss must revert because a fixed-receipt claim is still outstanding.
-    Test.expect(Test.executeTransaction(Test.Transaction(
-        code: Test.readFile("../../cadence/transactions/admin/realize_loss.cdc"),
-        authorizers: [protocolAddress],
-        signers: [protocolAccount],
-        arguments: [30.0],
-    )), Test.beFailed())
+    let loss = 30.0
+    realizeLoss(loss)
+
+    Test.assertEqual(totalBefore - loss, readTotalFlowStaked())
+    Test.assert(outstandingBefore > readTotalFlowReceiptsOutstanding(), message: "Outstanding receipt amount must be reduced")
 }
 
 access(all)
 fun testUnstakeRevertsWhenUnstakingPaused() {
+    reconcileIfNeeded()
+
+    Test.expect(Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/test/helpers/user_stake.cdc"),
+        authorizers: [userAccount.address],
+        signers: [userAccount],
+        arguments: [10.0],
+    )), Test.beSucceeded())
+
     setUnstakingPaused(true)
 
     let txResult = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
         authorizers: [userAccount.address],
         signers: [userAccount],
-        arguments: [1.0],
+        arguments: [2.0],
     ))
     Test.expect(txResult, Test.beFailed())
     Test.assert(
@@ -868,7 +884,7 @@ fun testUnstakeRevertsWhenUnstakingPaused() {
         code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
         authorizers: [userAccount.address],
         signers: [userAccount],
-        arguments: [1.0],
+        arguments: [2.0],
     ))
     Test.expect(successTx, Test.beSucceeded())
 }
@@ -991,6 +1007,16 @@ fun readTotalFlowStaked(): UFix64 {
 }
 
 access(all)
+fun readTotalFlowReceiptsOutstanding(): UFix64 {
+    let r = Test.executeScript(
+        "import \"LiquidStaking\"\naccess(all) fun main(): UFix64 { return LiquidStaking.totalFlowReceiptsOutstanding }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UFix64
+}
+
+access(all)
 fun readDelegatorBuckets(): [UFix64] {
     let r = Test.executeScript(
         Test.readFile("../../cadence/test/helpers/get_delegator_info.cdc"),
@@ -1038,6 +1064,24 @@ fun readFlowPerSFlow(): UFix64 {
     )
     Test.expect(r, Test.beSucceeded())
     return r.returnValue! as! UFix64
+}
+
+access(all)
+fun readMaxRealizableLoss(): UFix64 {
+    let r = Test.executeScript(
+        "import \"LiquidStaking\"\naccess(all) fun main(): UFix64 { return LiquidStaking.maxRealizableLoss() }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UFix64
+}
+
+access(all)
+fun reconcileIfNeeded() {
+    let maxLoss = readMaxRealizableLoss()
+    if maxLoss > 0.0 {
+        realizeLoss(maxLoss)
+    }
 }
 
 access(all)

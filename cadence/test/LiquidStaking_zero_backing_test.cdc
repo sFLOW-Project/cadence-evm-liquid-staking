@@ -131,6 +131,13 @@ fun deployAll() {
         arguments: [],
     )
     Test.expect(err, Test.beNil())
+
+    err = Test.deployContract(
+        name: "RelayerRouter",
+        path: "../../cadence/test/fixtures/RelayerRouterStub.cdc",
+        arguments: [],
+    )
+    Test.expect(err, Test.beNil())
 }
 
 access(all)

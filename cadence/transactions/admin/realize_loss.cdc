@@ -1,9 +1,7 @@
 import "LiquidStaking"
 import "LiquidStakingConfig"
+import "RelayerRouter"
 
-/// Governance-only: permanently reduce `LiquidStaking.totalFlowStaked` after a
-/// confirmed, unrecoverable slashing loss. This prevents phantom backing by making
-/// the loss visible in the exchange rate.
 transaction(amount: UFix64) {
     prepare(signer: auth(BorrowValue) &Account) {
         let admin = signer.storage
@@ -11,5 +9,12 @@ transaction(amount: UFix64) {
             ?? panic("Signer has no LiquidStakingConfig.Admin")
 
         LiquidStaking.realizeLoss(amount: amount, admin: admin)
+
+        if LiquidStaking.totalFlowStaked > 0.0 {
+            RelayerRouter.syncRate(
+                rateScaled: LiquidStaking.flowPerSFlowScaled(),
+                admin: admin
+            )
+        }
     }
 }

@@ -415,7 +415,7 @@ access(all) contract LiquidStakingConfig {
                 message: "Receipt \(receiptUuid) claim \(expected) != withdraw \(amount)"
             )
 
-            var out <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>()) as! @FlowToken.Vault
+            var out <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>())
             var i = 0
             while i < legs.length {
                 let leg = legs[i]
@@ -436,37 +436,40 @@ access(all) contract LiquidStakingConfig {
             return <-out
         }
 
-        /// Partial withdraw for stuck-receipt recovery. Pulls what is available
-        /// from each leg's unstaked bucket; refunds shortfall via reduced claim.
-        access(contract) fun withdrawClaimPartial(receiptUuid: UInt64, amount: UFix64): @FlowToken.Vault {
+        access(contract) fun withdrawClaimPartial(receiptUuid: UInt64, claimAmount: UFix64, maxWithdraw: UFix64): @FlowToken.Vault {
             let legs = self.claimsByReceipt.remove(key: receiptUuid)
                 ?? panic("No claim legs for receipt \(receiptUuid)")
             let expected = self.sumLegs(legs)
             assert(
-                expected == amount,
-                message: "Receipt \(receiptUuid) claim \(expected) != withdraw \(amount)"
+                expected == claimAmount,
+                message: "Receipt \(receiptUuid) claim \(expected) != claimAmount \(claimAmount)"
             )
 
-            var out <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>()) as! @FlowToken.Vault
+            var out <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>())
             var withdrawn = 0.0
             var releasedClaims = 0.0
+            var remainingMax = maxWithdraw
             var i = 0
             while i < legs.length {
                 let leg = legs[i]
                 let slot = self.borrowSlot(leg.slotId)
-                let info = slot.info()
-                var take = leg.amount
-                if info.tokensUnstaked < take {
-                    take = info.tokensUnstaked
+                if remainingMax > 0.0 {
+                    let info = slot.info()
+                    var take = leg.amount
+                    if info.tokensUnstaked < take {
+                        take = info.tokensUnstaked
+                    }
+                    if take > remainingMax {
+                        take = remainingMax
+                    }
+                    if take > 0.0 {
+                        let piece <- slot.borrowDelegator()
+                            .withdrawUnstakedTokens(amount: take) as! @FlowToken.Vault
+                        out.deposit(from: <-piece)
+                        withdrawn = withdrawn + take
+                        remainingMax = remainingMax - take
+                    }
                 }
-                if take > 0.0 {
-                    let piece <- slot.borrowDelegator()
-                        .withdrawUnstakedTokens(amount: take) as! @FlowToken.Vault
-                    out.deposit(from: <-piece)
-                    withdrawn = withdrawn + take
-                }
-                // Full leg claim is released even on shortfall (matches prior
-                // withdrawStuckReceipt destroying the receipt).
                 slot.reducePendingClaims(leg.amount)
                 releasedClaims = releasedClaims + leg.amount
                 i = i + 1
@@ -855,9 +858,8 @@ access(all) contract LiquidStakingConfig {
         return <-self.borrowSet().withdrawClaim(receiptUuid: receiptUuid, amount: amount)
     }
 
-    /// Partial settle for stuck EVM receipts (`LiquidStaking.withdrawStuckReceipt`).
-    access(account) fun withdrawFromUnstakedPartial(receiptUuid: UInt64, amount: UFix64): @FlowToken.Vault {
-        return <-self.borrowSet().withdrawClaimPartial(receiptUuid: receiptUuid, amount: amount)
+    access(account) fun withdrawFromUnstakedPartial(receiptUuid: UInt64, claimAmount: UFix64, maxWithdraw: UFix64): @FlowToken.Vault {
+        return <-self.borrowSet().withdrawClaimPartial(receiptUuid: receiptUuid, claimAmount: claimAmount, maxWithdraw: maxWithdraw)
     }
 
     /// Harvest rewards across all slots; restake onto Active (or deposit target
@@ -953,17 +955,6 @@ access(all) contract LiquidStakingConfig {
 
         access(all) fun setDepositTarget(slotId: UInt64) {
             LiquidStakingConfig.borrowSet().setDepositTarget(slotId: slotId)
-        }
-
-        /// Push the current Cadence FLOW/sFLOW rate to the EVM vault. Called automatically
-        /// by `LiquidStaking.realizeLoss` so the EVM `_rate` does not stay desynchronized
-        /// after a loss is booked.
-        access(all) fun syncRate(rateScaled: UInt256) {
-            EVMRoute.syncRate(
-                coa: self.borrowCoa(),
-                vault: self.vault,
-                rateScaled: rateScaled
-            )
         }
 
         access(all) fun retireSlot(slotId: UInt64) {

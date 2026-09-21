@@ -293,11 +293,28 @@ access(all) contract RelayerRouter {
             message: "Unstake request \(unstakeRequestId) status \(evictedStatus), expected FULFILLED (\(self.evmRequestFulfilled))"
         )
 
+        if LiquidStaking.totalFlowStaked > 0.0 {
+            EVMRoute.syncRate(
+                coa: coa,
+                vault: vaultAddr,
+                rateScaled: LiquidStaking.flowPerSFlowScaled()
+            )
+        }
+
         emit StuckReceiptEvicted(
             unstakeRequestId: unstakeRequestId,
             receiptUuid: receiptUuid,
             flowAmount: flowAmount,
             flowReturned: flowReturned
+        )
+    }
+
+    access(all) fun syncRate(rateScaled: UInt256, admin: &LiquidStakingConfig.Admin) {
+        let _ = admin
+        EVMRoute.syncRate(
+            coa: self.borrowCoa(),
+            vault: self.vaultAddr(),
+            rateScaled: rateScaled
         )
     }
 
