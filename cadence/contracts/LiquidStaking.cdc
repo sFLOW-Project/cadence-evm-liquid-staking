@@ -21,6 +21,15 @@ access(all) contract LiquidStaking {
 
     access(all) var outstandingLossFactor: UFix64
 
+    /// FLOW that a receipt settlement (`withdrawStuckReceipt` /
+    /// `settleNativeStuckReceipt`) could not pay out, pending admin classification as
+    /// either recoverable (`reconcileRecoveredShortfall`) or a permanent loss
+    /// (`writeOffShortfall`). Unlike the prior behavior of unconditionally re-adding the
+    /// unpaid remainder to `totalFlowStaked`, this counter is deliberately excluded from
+    /// `totalFlowStaked` so sFLOW backing is never overstated by an unverified remainder --
+    /// a genuine permanent loss must not silently inflate the exchange rate's backing.
+    access(all) var unclassifiedShortfall: UFix64
+
     /// Permanently locked protocol-owned sFLOW. Seeded once with matching FLOW backing so
     /// `totalSupply` cannot be burned down to a UFix64 dust amount.
     access(all) let protocolOwnedSFlowFloor: UFix64
@@ -35,6 +44,9 @@ access(all) contract LiquidStaking {
     access(all) event RewardsCompounded(rewardAmount: UFix64, feeAmount: UFix64)
     access(all) event FlowReceiptDeposited(id: UInt64, flowAmount: UFix64, unlockEpoch: UInt64, owner: Address?)
     access(all) event FlowReceiptWithdrawn(id: UInt64, flowAmount: UFix64, unlockEpoch: UInt64, owner: Address?)
+    access(all) event ShortfallRecorded(receiptId: UInt64, amount: UFix64, unclassifiedShortfall: UFix64)
+    access(all) event ShortfallReconciled(amount: UFix64, totalFlowStaked: UFix64, unclassifiedShortfall: UFix64)
+    access(all) event ShortfallWrittenOff(amount: UFix64, unclassifiedShortfall: UFix64)
 
     /// Bearer resource proving the holder is owed `amount` FLOW after `unlockEpoch`.
     /// Destroying this resource outside the protocol `withdraw` / `withdrawStuckReceipt`
@@ -121,9 +133,14 @@ access(all) contract LiquidStaking {
             LiquidStakingConfig.isUnstakingPaused == false: "Unstaking is paused"
         }
 
+        // actualDelegatorBacking() reflects FLOW reserved for both live
+        // sFLOW backing (totalFlowStaked) and outstanding FlowReceipt claims
+        // (totalFlowReceiptsOutstanding), so the reconciliation guard must compare
+        // against their combined basis, not totalFlowStaked alone.
+        let basis = self.totalFlowStaked + self.totalFlowReceiptsOutstanding
         assert(
-            self.totalFlowStaked <= self.actualDelegatorBacking(),
-            message: "Unstaking is blocked until reconciled: totalFlowStaked \(self.totalFlowStaked) exceeds actual backing \(self.actualDelegatorBacking())"
+            basis <= self.actualDelegatorBacking(),
+            message: "Unstaking is blocked until reconciled: combined basis \(basis) exceeds actual backing \(self.actualDelegatorBacking())"
         )
 
         let sFlowAmount = from.balance
@@ -203,6 +220,14 @@ access(all) contract LiquidStaking {
         return <- self.settleReceiptInternal(receipt: <-receipt)
     }
 
+    /// The unpaid remainder (`effective - returned`) is recorded in
+    /// `unclassifiedShortfall` rather than unconditionally re-added to `totalFlowStaked`.
+    /// Whether that remainder is actually still recoverable (e.g. still in flight, delayed
+    /// but not lost) or a permanent slashing loss is a judgment call this settlement path
+    /// cannot make on its own -- it only observes that the delegator bucket came up short.
+    /// The admin resolves the classification afterward via `reconcileRecoveredShortfall`
+    /// (if verified recoverable) or `writeOffShortfall` (if a confirmed permanent loss),
+    /// which is tracked independently of any specific receipt.
     access(self) fun settleReceiptInternal(receipt: @FlowReceipt): @FlowToken.Vault {
         let effective = self.effectiveReceiptAmount(receipt: &receipt as &FlowReceipt)
         let flowVault <- LiquidStakingConfig.withdrawFromUnstakedPartial(
@@ -211,8 +236,16 @@ access(all) contract LiquidStaking {
             maxWithdraw: effective
         )
         let returned = flowVault.balance
+        let shortfall = effective - returned
 
-        self.totalFlowStaked = self.totalFlowStaked + (effective - returned)
+        if shortfall > 0.0 {
+            self.unclassifiedShortfall = self.unclassifiedShortfall + shortfall
+            emit ShortfallRecorded(
+                receiptId: receipt.uuid,
+                amount: shortfall,
+                unclassifiedShortfall: self.unclassifiedShortfall
+            )
+        }
         self.releaseOutstanding(amount: effective)
         emit UnstakeFulfilled(id: receipt.uuid, flowAmount: returned)
         destroy receipt
@@ -220,31 +253,102 @@ access(all) contract LiquidStaking {
         return <- flowVault
     }
 
-    access(all) fun realizeLoss(amount: UFix64, admin: &LiquidStakingConfig.Admin) {
+    /// Admin confirms that some or all of `unclassifiedShortfall` is still
+    /// recoverable (e.g. FLOW that was merely delayed, not permanently lost) and restores
+    /// it to `totalFlowStaked`. Bounded by the verified shortfall between the resulting
+    /// combined basis and `actualDelegatorBacking()` so this can never push recorded
+    /// backing above what is actually present -- the same guard `realizeLoss()` uses,
+    /// mirrored here to prevent recreating the original phantom-backing bug.
+    access(all) fun reconcileRecoveredShortfall(amount: UFix64, admin: &LiquidStakingConfig.Admin) {
         pre {
-            amount > 0.0: "Loss amount must be positive"
-            amount <= self.totalFlowStaked: "Loss \(amount) exceeds totalFlowStaked \(self.totalFlowStaked)"
+            amount > 0.0: "Reconciled amount must be positive"
+            amount <= self.unclassifiedShortfall:
+                "Reconciled amount \(amount) exceeds unclassifiedShortfall \(self.unclassifiedShortfall)"
         }
 
         let actualBacking = self.actualDelegatorBacking()
-        let maxLoss = self.totalFlowStaked > actualBacking
-            ? self.totalFlowStaked - actualBacking
+        let basisAfter = self.totalFlowStaked + amount + self.totalFlowReceiptsOutstanding
+        assert(
+            basisAfter <= actualBacking,
+            message: "Reconciled amount \(amount) would push combined basis \(basisAfter) above actual backing \(actualBacking)"
+        )
+
+        self.unclassifiedShortfall = self.unclassifiedShortfall - amount
+        self.totalFlowStaked = self.totalFlowStaked + amount
+        emit ShortfallReconciled(
+            amount: amount,
+            totalFlowStaked: self.totalFlowStaked,
+            unclassifiedShortfall: self.unclassifiedShortfall
+        )
+    }
+
+    /// Admin confirms that some or all of `unclassifiedShortfall` is a permanent,
+    /// unrecoverable loss. No backing adjustment is needed here: the amount was never added
+    /// to `totalFlowStaked` in the first place, so simply clearing the counter is sufficient
+    /// to close out the claim without ever having inflated the exchange-rate backing.
+    access(all) fun writeOffShortfall(amount: UFix64, admin: &LiquidStakingConfig.Admin) {
+        pre {
+            amount > 0.0: "Write-off amount must be positive"
+            amount <= self.unclassifiedShortfall:
+                "Write-off amount \(amount) exceeds unclassifiedShortfall \(self.unclassifiedShortfall)"
+        }
+
+        self.unclassifiedShortfall = self.unclassifiedShortfall - amount
+        emit ShortfallWrittenOff(amount: amount, unclassifiedShortfall: self.unclassifiedShortfall)
+    }
+
+    /// `totalFlowStaked` alone understates the FLOW the protocol has promised,
+    /// because it excludes `totalFlowReceiptsOutstanding` (FLOW already reserved for
+    /// unmatured/unsettled `FlowReceipt`s). `actualDelegatorBacking()` *does* include that
+    /// reserved FLOW, so comparing it against `totalFlowStaked` alone mismatches bases and
+    /// can understate a genuine shortfall. We measure and allocate the loss against the
+    /// combined basis `B + Q` (sFLOW backing + outstanding receipt claims) and scale both
+    /// components down by the same ratio, so neither sFLOW holders nor pending receipt
+    /// holders are shielded from (or over-exposed to) a confirmed loss relative to the other.
+    access(all) fun realizeLoss(amount: UFix64, admin: &LiquidStakingConfig.Admin) {
+        pre {
+            amount > 0.0: "Loss amount must be positive"
+        }
+
+        let basis = self.totalFlowStaked + self.totalFlowReceiptsOutstanding
+        assert(basis > 0.0, message: "No FLOW basis to realize a loss against")
+
+        let actualBacking = self.actualDelegatorBacking()
+        let maxLoss = basis > actualBacking
+            ? basis - actualBacking
             : 0.0
         assert(
             amount <= maxLoss,
             message: "Loss \(amount) exceeds verifiable shortfall \(maxLoss)"
         )
 
-        let lossRatio = amount / self.totalFlowStaked
-        if self.totalFlowReceiptsOutstanding > 0.0 {
-            self.outstandingLossFactor = self.outstandingLossFactor + (1.0 - self.outstandingLossFactor) * lossRatio
-            self.totalFlowReceiptsOutstanding = self.totalFlowReceiptsOutstanding * (1.0 - lossRatio)
-        }
+        let lossRatio = amount / basis
+        self.outstandingLossFactor = self.outstandingLossFactor + (1.0 - self.outstandingLossFactor) * lossRatio
 
-        self.totalFlowStaked = self.totalFlowStaked - amount
+        // Derive the post-loss combined basis by exact subtraction (no extra rounding beyond
+        // the already-UFix64-grid-aligned inputs), then split it between the two components so
+        // their sum always matches `newBasis` exactly. Multiplying each component by
+        // `(1.0 - lossRatio)` independently (as the naive pro-rata formula suggests) can leave a
+        // small residual dust between `totalFlowStaked + totalFlowReceiptsOutstanding` and
+        // `actualDelegatorBacking()` after realizing the full verifiable shortfall, which would
+        // then permanently block the `unstake()` reconciliation guard by that dust amount.
+        let newBasis = basis - amount
+        var receiptsAfter = self.totalFlowReceiptsOutstanding * (1.0 - lossRatio)
+        if receiptsAfter > newBasis {
+            receiptsAfter = newBasis
+        }
+        self.totalFlowReceiptsOutstanding = receiptsAfter
+        self.totalFlowStaked = newBasis - receiptsAfter
+
         emit LossRealized(amount: amount, totalFlowStaked: self.totalFlowStaked)
     }
 
+    /// Net-reward rounding must match `LiquidStakingConfig.compoundAll()`'s basis
+    /// (`fee = gross * feePercent; net = gross - fee`) exactly, rather than the
+    /// mathematically-equivalent-in-reals-but-UFix64-truncation-divergent `gross * (1 -
+    /// feePercent)`. The two formulas can disagree by up to one UFix64 ULP (1e-8 FLOW) per
+    /// slot, which otherwise feeds a rounding mismatch directly into the `realizeLoss()` /
+    /// `maxRealizableLoss()` shortfall measurement.
     access(self) fun actualDelegatorBacking(): UFix64 {
         var total = 0.0
         let snapshots = LiquidStakingConfig.getSlotSnapshots()
@@ -256,21 +360,27 @@ access(all) contract LiquidStaking {
                 nodeID: s.nodeID,
                 delegatorID: s.flowDelegatorId
             )
+            let grossRewarded = info.tokensRewarded
+            let feeAmount = grossRewarded * feePercent
+            let netRewarded = grossRewarded - feeAmount
             total = total
                 + info.tokensCommitted
                 + info.tokensStaked
                 + info.tokensUnstaking
                 + info.tokensUnstaked
-                + info.tokensRewarded * (1.0 - feePercent)
+                + netRewarded
             i = i + 1
         }
         return total
     }
 
+    /// Measured on the same combined basis (`totalFlowStaked +
+    /// totalFlowReceiptsOutstanding`) as `realizeLoss()` and `actualDelegatorBacking()`.
     access(all) fun maxRealizableLoss(): UFix64 {
+        let basis = self.totalFlowStaked + self.totalFlowReceiptsOutstanding
         let actualBacking = self.actualDelegatorBacking()
-        return self.totalFlowStaked > actualBacking
-            ? self.totalFlowStaked - actualBacking
+        return basis > actualBacking
+            ? basis - actualBacking
             : 0.0
     }
 
@@ -483,6 +593,7 @@ access(all) contract LiquidStaking {
         self.totalFlowStaked = 0.0
         self.totalFlowReceiptsOutstanding = 0.0
         self.outstandingLossFactor = 0.0
+        self.unclassifiedShortfall = 0.0
         self.protocolOwnedSFlowFloor = 1.0
         self.protocolOwnedSFlow <- sFlowToken.createEmptyVault(vaultType: Type<@sFlowToken.Vault>())
         let pool <- FlowToken.createEmptyVault(vaultType: Type<@FlowToken.Vault>())

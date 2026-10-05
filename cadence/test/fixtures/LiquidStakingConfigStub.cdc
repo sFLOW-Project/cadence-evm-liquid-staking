@@ -138,6 +138,10 @@ access(all) contract LiquidStakingConfig {
         access(all) let id: UInt64
         access(all) var status: UInt8
         access(all) var pendingClaims: UFix64
+        /// Mirrors the real `LiquidStakingConfig.cdc` -- claims reserved against
+        /// this slot, bucketed by the unlock epoch they were allocated with, so
+        /// `dueClaimsNow()` can sum only claims that have actually matured.
+        access(self) var dueByEpoch: {UInt64: UFix64}
         access(contract) let delegator: @FlowIDTableStaking.NodeDelegator
 
         access(contract) fun borrowDelegator(): auth(FlowIDTableStaking.DelegatorOwner) &FlowIDTableStaking.NodeDelegator {
@@ -155,22 +159,48 @@ access(all) contract LiquidStakingConfig {
             self.status = status
         }
 
-        access(contract) fun addPendingClaims(_ amount: UFix64) {
+        access(contract) fun addPendingClaims(_ amount: UFix64, unlockEpoch: UInt64) {
             self.pendingClaims = self.pendingClaims + amount
+            self.dueByEpoch[unlockEpoch] = (self.dueByEpoch[unlockEpoch] ?? 0.0) + amount
         }
 
-        access(contract) fun reducePendingClaims(_ amount: UFix64) {
+        access(contract) fun reducePendingClaims(_ amount: UFix64, unlockEpoch: UInt64) {
             assert(
                 self.pendingClaims >= amount,
                 message: "DelegatorSlot \(self.id): pendingClaims \(self.pendingClaims) < reduce \(amount)"
             )
             self.pendingClaims = self.pendingClaims - amount
+
+            let existing = self.dueByEpoch[unlockEpoch]
+                ?? panic("DelegatorSlot \(self.id): no claims reserved for unlock epoch \(unlockEpoch)")
+            assert(
+                existing >= amount,
+                message: "DelegatorSlot \(self.id): epoch \(unlockEpoch) claims \(existing) < reduce \(amount)"
+            )
+            let remaining = existing - amount
+            if remaining == 0.0 {
+                self.dueByEpoch.remove(key: unlockEpoch)
+            } else {
+                self.dueByEpoch[unlockEpoch] = remaining
+            }
+        }
+
+        access(contract) fun dueClaimsNow(): UFix64 {
+            let current = FlowEpoch.currentEpochCounter
+            var total = 0.0
+            for epoch in self.dueByEpoch.keys {
+                if epoch <= current {
+                    total = total + self.dueByEpoch[epoch]!
+                }
+            }
+            return total
         }
 
         init(id: UInt64, delegator: @FlowIDTableStaking.NodeDelegator) {
             self.id = id
             self.status = LiquidStakingConfig.slotStatusActive
             self.pendingClaims = 0.0
+            self.dueByEpoch = {}
             self.delegator <- delegator
         }
     }
@@ -413,7 +443,7 @@ access(all) contract LiquidStakingConfig {
                 let slot = self.borrowSlot(leg.slotId)
                 let piece <- slot.borrowDelegator()
                     .withdrawUnstakedTokens(amount: leg.amount) as! @FlowToken.Vault
-                slot.reducePendingClaims(leg.amount)
+                slot.reducePendingClaims(leg.amount, unlockEpoch: leg.unlockEpoch)
                 out.deposit(from: <-piece)
                 i = i + 1
             }
@@ -427,6 +457,8 @@ access(all) contract LiquidStakingConfig {
             return <-out
         }
 
+        /// Mirrors the real `LiquidStakingConfig.cdc` pro-rata haircut -- see that
+        /// file for the full rationale.
         access(contract) fun withdrawClaimPartial(receiptUuid: UInt64, claimAmount: UFix64, maxWithdraw: UFix64): @FlowToken.Vault {
             let legs = self.claimsByReceipt.remove(key: receiptUuid)
                 ?? panic("No claim legs for receipt \(receiptUuid)")
@@ -446,9 +478,11 @@ access(all) contract LiquidStakingConfig {
                 let slot = self.borrowSlot(leg.slotId)
                 if remainingMax > 0.0 {
                     let info = slot.info()
+                    let available = info.tokensUnstaked
+                    let dueNow = slot.dueClaimsNow()
                     var take = leg.amount
-                    if info.tokensUnstaked < take {
-                        take = info.tokensUnstaked
+                    if dueNow > available {
+                        take = leg.amount * available / dueNow
                     }
                     if take > remainingMax {
                         take = remainingMax
@@ -461,7 +495,7 @@ access(all) contract LiquidStakingConfig {
                         remainingMax = remainingMax - take
                     }
                 }
-                slot.reducePendingClaims(leg.amount)
+                slot.reducePendingClaims(leg.amount, unlockEpoch: leg.unlockEpoch)
                 releasedClaims = releasedClaims + leg.amount
                 i = i + 1
             }
@@ -611,7 +645,7 @@ access(all) contract LiquidStakingConfig {
                     want: left
                 )
                 if taken.amount > 0.0 {
-                    slot.addPendingClaims(taken.amount)
+                    slot.addPendingClaims(taken.amount, unlockEpoch: taken.unlockEpoch)
                     legs.append(ClaimLeg(
                         slotId: slot.id,
                         amount: taken.amount,
@@ -642,7 +676,7 @@ access(all) contract LiquidStakingConfig {
                 if free > 0.0 {
                     let take = left < free ? left : free
                     slot.borrowDelegator().requestUnstaking(amount: take)
-                    slot.addPendingClaims(take)
+                    slot.addPendingClaims(take, unlockEpoch: requestUnlock)
                     legs.append(ClaimLeg(
                         slotId: slot.id,
                         amount: take,

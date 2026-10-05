@@ -484,11 +484,12 @@ fun testWithdrawStuckReceiptIgnoresAdminDelay() {
 }
 
 access(all)
-fun testWithdrawStuckReceiptRestoresUnwithdrawnToTotalFlowStaked() {
+fun testWithdrawStuckReceiptRecordsUnclassifiedShortfallInsteadOfInflatingTotalFlowStaked() {
     let unstakeSFlow: UFix64 = 5.0
     let expectedFlow = readCalcFlowFromSFlow(unstakeSFlow)
     let stakedAfterUnstakeExpected = readTotalFlowStaked() - expectedFlow
     let userFlowBefore = readFlowBalance(userAccount.address)
+    let shortfallBefore = readUnclassifiedShortfall()
 
     let unstakeTx = Test.executeTransaction(Test.Transaction(
         code: Test.readFile("../../cadence/test/helpers/user_unstake.cdc"),
@@ -520,15 +521,47 @@ fun testWithdrawStuckReceiptRestoresUnwithdrawnToTotalFlowStaked() {
     ))
     Test.expect(stuckWithdraw, Test.beSucceeded())
 
+    // The unpaid remainder must land in unclassifiedShortfall, not be silently
+    // re-added to totalFlowStaked (which would overstate backing if it later turns out to
+    // be a permanent loss rather than merely delayed).
     let unwithdrawn = receiptFlow - withdrawAmount
     Test.assertEqual(userFlowBefore + withdrawAmount, readFlowBalance(userAccount.address))
-    Test.assertEqual(stakedAfterUnstakeExpected + unwithdrawn, readTotalFlowStaked())
+    Test.assertEqual(stakedAfterUnstakeExpected, readTotalFlowStaked())
+    Test.assertEqual(shortfallBefore + unwithdrawn, readUnclassifiedShortfall())
     Test.assertEqual(0, readReceipts(userAccount.address).length)
 
     let fulfilled = Test.eventsOfType(Type<LiquidStaking.UnstakeFulfilled>())
     let last = fulfilled[fulfilled.length - 1] as! LiquidStaking.UnstakeFulfilled
     Test.assertEqual(uuid, last.id)
     Test.assertEqual(withdrawAmount, last.flowAmount)
+
+    let recorded = Test.eventsOfType(Type<LiquidStaking.ShortfallRecorded>())
+    let lastRecorded = recorded[recorded.length - 1] as! LiquidStaking.ShortfallRecorded
+    Test.assertEqual(uuid, lastRecorded.receiptId)
+    Test.assertEqual(unwithdrawn, lastRecorded.amount)
+}
+
+access(all)
+fun testWriteOffShortfallClearsCounterWithoutChangingTotalFlowStaked() {
+    let shortfallBefore = readUnclassifiedShortfall()
+    Test.assert(shortfallBefore > 0.0, message: "fixture must start with a nonzero unclassifiedShortfall")
+    let totalBefore = readTotalFlowStaked()
+
+    let tx = Test.executeTransaction(Test.Transaction(
+        code: Test.readFile("../../cadence/transactions/admin/write_off_shortfall.cdc"),
+        authorizers: [protocolAddress],
+        signers: [protocolAccount],
+        arguments: [shortfallBefore],
+    ))
+    Test.expect(tx, Test.beSucceeded())
+
+    Test.assertEqual(0.0, readUnclassifiedShortfall())
+    Test.assertEqual(totalBefore, readTotalFlowStaked())
+
+    let writtenOff = Test.eventsOfType(Type<LiquidStaking.ShortfallWrittenOff>())
+    let last = writtenOff[writtenOff.length - 1] as! LiquidStaking.ShortfallWrittenOff
+    Test.assertEqual(shortfallBefore, last.amount)
+    Test.assertEqual(0.0, last.unclassifiedShortfall)
 }
 
 access(all)
@@ -843,14 +876,22 @@ fun testRealizeLossAppliesToOutstandingReceipts() {
 
     let outstandingBefore = readTotalFlowReceiptsOutstanding()
     let totalBefore = readTotalFlowStaked()
+    let basisBefore = totalBefore + outstandingBefore
 
     slash(mockNodeID, 1 as UInt32, 150.0)
 
     let loss = 30.0
     realizeLoss(loss)
 
-    Test.assertEqual(totalBefore - loss, readTotalFlowStaked())
-    Test.assert(outstandingBefore > readTotalFlowReceiptsOutstanding(), message: "Outstanding receipt amount must be reduced")
+    // The loss is allocated pro-rata across the combined basis
+    // (totalFlowStaked + totalFlowReceiptsOutstanding), not totalFlowStaked alone, so the
+    // combined basis must shrink by exactly the realized loss while both components shrink
+    // individually.
+    let totalAfter = readTotalFlowStaked()
+    let outstandingAfter = readTotalFlowReceiptsOutstanding()
+    Test.assertEqual(basisBefore - loss, totalAfter + outstandingAfter)
+    Test.assert(totalBefore > totalAfter, message: "totalFlowStaked must be reduced")
+    Test.assert(outstandingBefore > outstandingAfter, message: "Outstanding receipt amount must be reduced")
 }
 
 access(all)
@@ -1010,6 +1051,16 @@ access(all)
 fun readTotalFlowReceiptsOutstanding(): UFix64 {
     let r = Test.executeScript(
         "import \"LiquidStaking\"\naccess(all) fun main(): UFix64 { return LiquidStaking.totalFlowReceiptsOutstanding }\n",
+        []
+    )
+    Test.expect(r, Test.beSucceeded())
+    return r.returnValue! as! UFix64
+}
+
+access(all)
+fun readUnclassifiedShortfall(): UFix64 {
+    let r = Test.executeScript(
+        "import \"LiquidStaking\"\naccess(all) fun main(): UFix64 { return LiquidStaking.unclassifiedShortfall }\n",
         []
     )
     Test.expect(r, Test.beSucceeded())

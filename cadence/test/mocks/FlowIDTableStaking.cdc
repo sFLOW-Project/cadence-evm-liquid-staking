@@ -108,6 +108,19 @@ access(all) contract FlowIDTableStaking {
             self.staked = self.staked - amount
         }
 
+        /// test-only: simulate a slash that hits FLOW already reserved for
+        /// unstaking/withdrawal (unlike `slash`, which only touches `staked`). Real Flow
+        /// slashing acts on whatever a node has locked regardless of our internal bucket
+        /// subdivision, so claims already allocated against `unstaked` are not actually
+        /// protected from loss. Used to construct a genuine physical-shortfall scenario for
+        /// settlement-order fairness tests.
+        access(contract) fun slashUnstaked(amount: UFix64) {
+            assert(amount <= self.unstaked, message: "Slash amount exceeds unstaked balance")
+            self.unstaked = self.unstaked - amount
+            let burned <- self.vault.withdraw(amount: amount)
+            destroy burned
+        }
+
         init() {
             self.committed = 0.0
             self.staked = 0.0
@@ -273,6 +286,13 @@ access(all) contract FlowIDTableStaking {
         let key = self.bucketKey(nodeID: nodeID, delegatorID: delegatorID)
         let bucket = self.borrowBucket(key: key) ?? panic("delegator not found")
         bucket.slash(amount: amount)
+    }
+
+    /// test-only: see `DelegatorBuckets.slashUnstaked` for rationale.
+    access(all) fun slashUnstaked(nodeID: String, delegatorID: UInt32, amount: UFix64) {
+        let key = self.bucketKey(nodeID: nodeID, delegatorID: delegatorID)
+        let bucket = self.borrowBucket(key: key) ?? panic("delegator not found")
+        bucket.slashUnstaked(amount: amount)
     }
 
     /// Current reward-pool balance (used by tests for sanity).

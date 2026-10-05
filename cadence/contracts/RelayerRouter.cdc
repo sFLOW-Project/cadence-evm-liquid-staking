@@ -193,6 +193,15 @@ access(all) contract RelayerRouter {
         destroy replaced
     }
 
+    /// `LiquidStaking.withdraw()` can return less than the receipt's original
+    /// `amount` once a loss has been realized against outstanding receipts
+    /// (`LiquidStaking.realizeLoss` / `effectiveReceiptAmount`). `LSPVault.fulfillUnstakeRequest`
+    /// requires `msg.value == req.flowAmount` (the original EVM-confirmed amount), so always
+    /// calling it here would revert on any loss-adjusted receipt, forcing every haircut
+    /// receipt through admin eviction instead of ordinary permissionless finalization.
+    /// Mirror the payout selection already used in `evictStuckReceiptInternal()`: full
+    /// fulfillment when the receipt pays out in full, `fulfillUnstakeRequestPartial` when
+    /// a smaller positive amount was recovered, `fulfillUnstakeRequestZero` when nothing was.
     access(self) fun finalizeUnstakeInternal(unstakeRequestId: UInt256) {
         let coa = self.borrowCoa()
         let vaultAddr = self.vaultAddr()
@@ -205,18 +214,39 @@ access(all) contract RelayerRouter {
 
         let receiptOpt <- self.evmRequestIdToReceipt.remove(key: unstakeRequestId)
         let receipt <- receiptOpt ?? panic("No stored receipt for unstake request \(unstakeRequestId)")
+        let confirmedAmount = receipt.amount
 
         let flowVault <- LiquidStaking.withdraw(receipt: <-receipt)
-        let flowReturnedWei = EVMRoute.ufix64FlowToWeiUInt256(flowVault.balance)
+        let flowReturned = flowVault.balance
+        let flowReturnedWei = EVMRoute.ufix64FlowToWeiUInt256(flowReturned)
+        assert(
+            flowReturned <= confirmedAmount,
+            message: "Unstake request \(unstakeRequestId) returned more FLOW (\(flowReturned)) than confirmed (\(confirmedAmount))"
+        )
 
         coa.deposit(from: <-flowVault)
 
-        EVMRoute.fulfillUnstakeRequest(
-            coa: coa,
-            vault: vaultAddr,
-            id: unstakeRequestId,
-            attoflowAmount: UInt(flowReturnedWei)
-        )
+        if flowReturned == 0.0 {
+            EVMRoute.fulfillUnstakeRequestZero(
+                coa: coa,
+                vault: vaultAddr,
+                id: unstakeRequestId
+            )
+        } else if flowReturned < confirmedAmount {
+            EVMRoute.fulfillUnstakeRequestPartial(
+                coa: coa,
+                vault: vaultAddr,
+                id: unstakeRequestId,
+                attoflowAmount: UInt(flowReturnedWei)
+            )
+        } else {
+            EVMRoute.fulfillUnstakeRequest(
+                coa: coa,
+                vault: vaultAddr,
+                id: unstakeRequestId,
+                attoflowAmount: UInt(flowReturnedWei)
+            )
+        }
 
         let finalizedStatus = EVMRoute.readUnstakeRequest(coa: coa, vault: vaultAddr, id: unstakeRequestId).status
         assert(
