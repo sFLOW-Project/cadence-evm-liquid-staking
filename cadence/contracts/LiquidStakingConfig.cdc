@@ -504,8 +504,11 @@ access(all) contract LiquidStakingConfig {
                     let dueNow = slot.dueClaimsNow()
                     var take = leg.amount
                     if dueNow > available {
-                        // Pro-rata haircut across every claim due now on this slot.
-                        take = leg.amount * available / dueNow
+                        let legAmountScaled = EVMRoute.tokenUFix64ToScaledUInt256(leg.amount)
+                        let availableScaled = EVMRoute.tokenUFix64ToScaledUInt256(available)
+                        let dueNowScaled = EVMRoute.tokenUFix64ToScaledUInt256(dueNow)
+                        let takeScaled = legAmountScaled * availableScaled / dueNowScaled
+                        take = EVMRoute.scaledUInt256ToTokenUFix64(takeScaled)
                     }
                     if take > remainingMax {
                         take = remainingMax

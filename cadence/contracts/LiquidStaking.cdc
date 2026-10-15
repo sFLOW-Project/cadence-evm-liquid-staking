@@ -384,6 +384,14 @@ access(all) contract LiquidStaking {
             : 0.0
     }
 
+    /// The cumulative loss factor that sets each receipt's entitlement and
+    /// `totalFlowReceiptsOutstanding` (reduced pro-rata by the same loss ratio in
+    /// `realizeLoss()`) are rounded independently on the UFix64 grid. After two or more
+    /// realized losses, summing every individual receipt's entitlement computed this way can
+    /// therefore exceed the recorded aggregate by a dust amount. Capping each settlement at
+    /// the remaining recorded total guarantees settled amounts can never sum to more than it
+    /// -- the aggregate counter remains the authoritative upper bound regardless of
+    /// per-receipt rounding drift.
     access(self) view fun effectiveReceiptAmount(receipt: &FlowReceipt): UFix64 {
         if self.outstandingLossFactor >= 1.0 {
             return 0.0
@@ -393,7 +401,10 @@ access(all) contract LiquidStaking {
         if oneMinusCreation == 0.0 {
             return 0.0
         }
-        return receipt.amount * oneMinusGlobal / oneMinusCreation
+        let raw = receipt.amount * oneMinusGlobal / oneMinusCreation
+        return raw > self.totalFlowReceiptsOutstanding
+            ? self.totalFlowReceiptsOutstanding
+            : raw
     }
 
     access(self) fun releaseOutstanding(amount: UFix64) {

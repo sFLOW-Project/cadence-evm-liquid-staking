@@ -2,6 +2,7 @@ import "FlowToken"
 import "FungibleToken"
 import "FlowIDTableStaking"
 import "FlowEpoch"
+import "EVMRoute"
 
 /// Test-only stub that stands in for `cadence/contracts/LiquidStakingConfig.cdc`
 /// when exercising `LiquidStaking.cdc` in `flow test`.
@@ -482,7 +483,13 @@ access(all) contract LiquidStakingConfig {
                     let dueNow = slot.dueClaimsNow()
                     var take = leg.amount
                     if dueNow > available {
-                        take = leg.amount * available / dueNow
+                        // See `LiquidStakingConfig.cdc`'s `withdrawClaimPartial` for the
+                        // overflow rationale: widen to UInt256 before multiplying.
+                        let legAmountScaled = EVMRoute.tokenUFix64ToScaledUInt256(leg.amount)
+                        let availableScaled = EVMRoute.tokenUFix64ToScaledUInt256(available)
+                        let dueNowScaled = EVMRoute.tokenUFix64ToScaledUInt256(dueNow)
+                        let takeScaled = legAmountScaled * availableScaled / dueNowScaled
+                        take = EVMRoute.scaledUInt256ToTokenUFix64(takeScaled)
                     }
                     if take > remainingMax {
                         take = remainingMax

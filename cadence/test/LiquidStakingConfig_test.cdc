@@ -42,6 +42,13 @@ fun setup() {
     )
     Test.expect(err, Test.beNil())
 
+    err = Test.deployContract(
+        name: "EVMRoute",
+        path: "../../cadence/contracts/EVMRoute.cdc",
+        arguments: [],
+    )
+    Test.expect(err, Test.beNil())
+
     setupFlowVault(protocolAccount)
     let mintResult = mintFlow(to: protocolAccount, amount: 1_000.0)
     Test.expect(mintResult, Test.beSucceeded())
