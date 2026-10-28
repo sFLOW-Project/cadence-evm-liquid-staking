@@ -1,0 +1,59 @@
+# Local stack for the keeper + Postgres (Drizzle).
+#
+# Postgres only (run keeper on host): docker compose up -d postgres
+# Full stack:                         docker compose up --build
+#
+# DATABASE_URL in keeper/.env is for host-side scripts.
+# KEEPER_DATABASE_URL is used inside the keeper container and uses hostname `postgres`.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keeper
+      POSTGRES_PASSWORD: keeper
+      POSTGRES_DB: keeper
+    ports:
+      - "5432:5432"
+    volumes:
+      - keeper_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keeper -d keeper"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keeper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${KEEPER_DATABASE_URL:-postgresql://keeper:keeper@postgres:5432/keeper}
+      EVM_RPC_URL: ${EVM_RPC_URL:?Set EVM_RPC_URL in keeper/.env or export it}
+      START_BLOCK: ${START_BLOCK:-1}
+      FLOW_ACCESS_NODE: ${FLOW_ACCESS_NODE:?Set FLOW_ACCESS_NODE}
+      FLOW_NETWORK: ${FLOW_NETWORK:-emulator}
+      FLOW_PAYER_ADDRESS: ${FLOW_PAYER_ADDRESS:?Set FLOW_PAYER_ADDRESS}
+      FLOW_PAYER_PRIVATE_KEY: ${FLOW_PAYER_PRIVATE_KEY:?Set FLOW_PAYER_PRIVATE_KEY}
+      FLOW_PAYER_KEY_ID: ${FLOW_PAYER_KEY_ID:-0}
+      MAX_BRIDGE_FLOW_FEE: ${MAX_BRIDGE_FLOW_FEE:-1.0}
+      FINALIZE_POLL_INTERVAL_MS: ${FINALIZE_POLL_INTERVAL_MS:-30000}
+      COMPOUND_POLL_INTERVAL_MS: ${COMPOUND_POLL_INTERVAL_MS:-3600000}
+      FLOW_CONTRACT_RELAYER_ROUTER: ${FLOW_CONTRACT_RELAYER_ROUTER:-}
+      FLOW_CONTRACT_LIQUID_STAKING: ${FLOW_CONTRACT_LIQUID_STAKING:-}
+      FLOW_CONTRACT_LIQUID_STAKING_CONFIG: ${FLOW_CONTRACT_LIQUID_STAKING_CONFIG:-}
+      FLOW_CONTRACT_SFLOW_TOKEN: ${FLOW_CONTRACT_SFLOW_TOKEN:-}
+      FLOW_CONTRACT_EVM_ROUTE: ${FLOW_CONTRACT_EVM_ROUTE:-}
+      FLOW_CONTRACT_FLOW_EPOCH: ${FLOW_CONTRACT_FLOW_EPOCH:-}
+    # Uncomment when the keeper exposes an HTTP port:
+    # ports:
+    #   - "3000:3000"
+
+volumes:
+  keeper_pgdata:
