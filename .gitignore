@@ -30,6 +30,11 @@ keeper/dist/
 *.pkey
 testnet-key.json
 
+# protocol-deploy.sh local config/state (copy from protocol-deploy.config.example)
+protocol-deploy.config
+.protocol-deploy-state.*.env
+scripts/__pycache__/
+
 # Demo dashboard local overrides (may contain addresses / secrets)
 demo/config.local.js
 node_modules/

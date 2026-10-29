@@ -1,0 +1,57 @@
+# Copy to protocol-deploy.config (gitignored) and edit. No secrets go in this file —
+# the private key is loaded from the environment (see PROTOCOL_PRIVATE_KEY_ENV below).
+#
+# Sourced as a bash script by protocol-deploy.sh; only plain VAR=value assignments.
+
+# ---- Flow network / account -------------------------------------------------
+# Flow network name as it appears in flow.deploy.json's "networks" / "accounts" sections.
+NETWORK="testnet"
+# Account name in flow.deploy.json ("protocol-testnet" / "protocol-mainnet").
+ACCOUNT_NAME="protocol-testnet"
+# Path flow.deploy.json's account.key.location points at for $ACCOUNT_NAME (the script
+# writes the private key here from the env var named by PROTOCOL_PRIVATE_KEY_ENV).
+ACCOUNT_KEY_FILE="./protocol-testnet.pkey"
+# Name of the environment variable holding the hex-encoded ECDSA_P256 private key for
+# $ACCOUNT_NAME. The script reads $PROTOCOL_PRIVATE_KEY_ENV itself to get the actual key,
+# e.g. if this is PROTOCOL_PRIVATE_KEY, export PROTOCOL_PRIVATE_KEY=<hex key> before running.
+PROTOCOL_PRIVATE_KEY_ENV="PROTOCOL_PRIVATE_KEY"
+
+# Flow CLI config file(s), merged left to right (later overrides earlier). Keep secrets out;
+# flow.deploy.json already keys private keys off ACCOUNT_KEY_FILE.
+FLOW_CONFIG_PATHS=("flow.deploy.json")
+
+# ---- Protocol parameters ------------------------------------------------------
+# Flow node ID the protocol delegates to, and the initial FLOW commitment (UFix64 string).
+DELEGATOR_NODE_ID=""
+DELEGATOR_COMMIT_AMOUNT="250000.0"
+
+# Governance params for LiquidStakingConfig install.
+PROTOCOL_FEE_PERCENT="0.1"
+# Cadence Address (with 0x) that receives the FLOW protocol fee. Defaults to the protocol
+# account itself if left empty.
+PROTOCOL_FEE_RECEIVER=""
+# FLOW per stake/unstake floor; must equal the EVM vault's _minRequestAmount (same FLOW
+# amount, just UFix64 here vs wei on the EVM side — see MIN_REQUEST_AMOUNT_WEI below).
+MIN_OPERATION_AMOUNT="1.0"
+UNSTAKE_UNLOCK_EPOCH_DELAY="1"
+
+# Flow EVM JSON-RPC endpoint, used only to probe whether LSPVault bytecode is already
+# deployed at the predicted router-COA-nonce-0 address (idempotency check for step 6).
+EVM_RPC_URL="https://testnet.evm.nodes.onflow.org"
+
+# ---- EVM (LSPVault) parameters --------------------------------------------
+# FLOW wei floor for stake/unstake; must be > 0 and a multiple of 1e10 (exact UFix64 ulp),
+# and must represent the same FLOW amount as MIN_OPERATION_AMOUNT above.
+MIN_REQUEST_AMOUNT_WEI="1000000000000000000"
+# Gas limit for the LSPVault creation-bytecode deploy (large; raise if deploy reverts).
+DEPLOY_GAS_LIMIT="15000000"
+# Gas limit for the transferOwnership(address) call to governance.
+TRANSFER_OWNERSHIP_GAS_LIMIT="1000000"
+# FLOW funded into the router COA for Flow EVM gas (deploy + transferOwnership calls).
+ROUTER_COA_FUND_AMOUNT="5.0"
+# Upper bound on FLOW the bridge onboarding tx may pull from the signer's vault.
+MAX_ONBOARD_FLOW_FEE="5.0"
+
+# ---- Retry behaviour --------------------------------------------------------
+RETRY_ATTEMPTS=3
+RETRY_DELAY_SECONDS=5
