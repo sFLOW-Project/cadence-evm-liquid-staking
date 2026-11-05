@@ -40,3 +40,6 @@ demo/config.local.js
 node_modules/
 test-data.txt
 lcov.info
+
+*.pk
+.env

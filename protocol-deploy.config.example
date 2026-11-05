@@ -23,7 +23,7 @@ FLOW_CONFIG_PATHS=("flow.deploy.json")
 # ---- Protocol parameters ------------------------------------------------------
 # Flow node ID the protocol delegates to, and the initial FLOW commitment (UFix64 string).
 DELEGATOR_NODE_ID=""
-DELEGATOR_COMMIT_AMOUNT="250000.0"
+DELEGATOR_COMMIT_AMOUNT="500.0"
 
 # Governance params for LiquidStakingConfig install.
 PROTOCOL_FEE_PERCENT="0.1"

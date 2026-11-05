@@ -69,7 +69,7 @@ TRANSFER_OWNERSHIP_GAS_LIMIT="${TRANSFER_OWNERSHIP_GAS_LIMIT:-1000000}"
 ROUTER_COA_FUND_AMOUNT="${ROUTER_COA_FUND_AMOUNT:-5.0}"
 MAX_ONBOARD_FLOW_FEE="${MAX_ONBOARD_FLOW_FEE:-5.0}"
 
-PRIVATE_KEY="${!PROTOCOL_PRIVATE_KEY_ENV:-}"
+PRIVATE_KEY="$PROTOCOL_PRIVATE_KEY_ENV"
 if [[ -z "$PRIVATE_KEY" ]]; then
   echo "ERROR: environment variable \$$PROTOCOL_PRIVATE_KEY_ENV is not set." >&2
   echo "       export $PROTOCOL_PRIVATE_KEY_ENV=<hex ECDSA_P256 private key> before running." >&2
@@ -170,10 +170,13 @@ flow_tx() {
 }
 
 flow_tx_args_json() {
-  # flow_tx_args_json <cdc file> <args-json> -- same as flow_tx but for payloads too large/
-  # structured to pass as positional CLI arguments (e.g. [UInt8] bytecode, Config tuples).
-  local cdc="$1" args_json="$2"
-  retry_flow_tx flow transactions send "$cdc" --args-json "$args_json" \
+  local cdc="$1"
+  local args_json="$2"
+  local compute_limit="${3:-1000}"
+
+  retry_flow_tx flow transactions send "$cdc" \
+    --args-json "$args_json" \
+    --compute-limit "$compute_limit" \
     --signer "$ACCOUNT_NAME" "${FLOW_ARGS[@]}" -o json
 }
 
@@ -257,7 +260,8 @@ flow_tx cadence/transactions/deployment/bootstrap_protocol_account.cdc
 
 log "Step 3/12: onboard_sflow_token_type_for_evm_bridge.cdc"
 flow_tx cadence/transactions/deployment/onboard_sflow_token_type_for_evm_bridge.cdc \
-  "$MAX_ONBOARD_FLOW_FEE"
+  "$MAX_ONBOARD_FLOW_FEE" \
+  --compute-limit 9999
 
 log "Resolving bridged sFlow EVM address"
 SFLOW_EVM_HEX="$(flow_script cadence/scripts/deployment/get_bridged_sflow_evm_address.cdc)"
@@ -316,49 +320,50 @@ log "Router COA EVM address: $ROUTER_COA_EVM_HEX"
 # Idempotent in effect: topping up the COA's FLOW balance is safe to repeat (worst case it
 # ends up with more gas headroom than strictly needed).
 
-log "Step 5/12: fund_router_coa_flow.cdc ($ROUTER_COA_FUND_AMOUNT FLOW)"
-flow_tx cadence/transactions/deployment/fund_router_coa_flow.cdc "$ROUTER_COA_FUND_AMOUNT"
+# log "Step 5/12: fund_router_coa_flow.cdc ($ROUTER_COA_FUND_AMOUNT FLOW)"
+# flow_tx cadence/transactions/deployment/fund_router_coa_flow.cdc "$ROUTER_COA_FUND_AMOUNT"
 
 # ---------------------------------------------------------------------------
-# Step 6: deploy_lsp_vault_evm.cdc (forge build + cast encode + coa.deploy)
+# Step 6: deploy_lsp_vault_evm.cdc (coa.deploy)
 # ---------------------------------------------------------------------------
 # NOT idempotent on its own: re-sending would deploy a second, distinct LSPVault (EVM CREATE
-# address depends on the deployer's nonce at send time). Guard by predicting the address the
-# very first call/deploy from this COA would land at (nonce 0 — create_router_coa.cdc only
-# saves the COA and fund_router_coa_flow.cdc only deposits value, neither increments the
-# COA's EVM nonce) and checking whether code already exists there.
+# address depends on the deployer's nonce at send time). Guard by state.
 
 log "Step 6/12: deploy LSPVault to Flow EVM"
 
-log "forge build"
-retry forge build --root evm --silent
+# Read the saved address directly. No load_state helper required.
+LSPVAULT_EVM_HEX="$(
+  sed -n 's/^LSPVAULT_EVM_HEX=//p' "$STATE_FILE" 2>/dev/null | tail -n 1
+)"
 
-LSPVAULT_ARTIFACT="evm/out/LSPVault.sol/LSPVault.json"
-[[ -f "$LSPVAULT_ARTIFACT" ]] || die "missing build artifact: $LSPVAULT_ARTIFACT"
+log "Loaded LSPVAULT_EVM_HEX: '${LSPVAULT_EVM_HEX:-<empty>}'"
+log "State file: $STATE_FILE"
 
-PREDICTED_VAULT_ADDRESS="$(cast compute-address "$ROUTER_COA_EVM_HEX" --nonce 0 2>/dev/null | awk '{print $NF}')"
-[[ -n "$PREDICTED_VAULT_ADDRESS" ]] || die "cast compute-address failed for router COA $ROUTER_COA_EVM_HEX"
+if [[ -n "$LSPVAULT_EVM_HEX" ]]; then
+  EXISTING_CODE="$(retry cast code "$LSPVAULT_EVM_HEX" --rpc-url "$EVM_RPC_URL")"
 
-EXISTING_CODE="$(retry cast code "$PREDICTED_VAULT_ADDRESS" --rpc-url "$EVM_RPC_URL")"
+  if [[ -n "$EXISTING_CODE" && "$EXISTING_CODE" != "0x" ]]; then
+    log "LSPVault already deployed at $LSPVAULT_EVM_HEX, skipping deploy"
+  else
+    log "Saved LSPVault address has no observable code; deployment will proceed"
+    LSPVAULT_EVM_HEX=""
+  fi
+fi
+
+EXISTING_CODE="$(retry cast code "$LSPVAULT_EVM_HEX" --rpc-url "$EVM_RPC_URL")"
 if [[ -n "$EXISTING_CODE" && "$EXISTING_CODE" != "0x" ]]; then
-  log "LSPVault already deployed at $PREDICTED_VAULT_ADDRESS, skipping deploy"
-  LSPVAULT_EVM_HEX="$PREDICTED_VAULT_ADDRESS"
+  log "LSPVault already deployed at $LSPVAULT_EVM_HEX, skipping deploy"
+  LSPVAULT_EVM_HEX="$LSPVAULT_EVM_HEX"
 else
-  CREATION_BYTECODE="$(jq -r '.bytecode.object' "$LSPVAULT_ARTIFACT")"
-  [[ "$CREATION_BYTECODE" != "null" && -n "$CREATION_BYTECODE" ]] \
-    || die "no bytecode.object in $LSPVAULT_ARTIFACT"
-
-  CONSTRUCTOR_ARGS="$(cast abi-encode "constructor(address,address,uint256)" \
-    "$SFLOW_EVM_HEX" "$ROUTER_COA_EVM_HEX" "$MIN_REQUEST_AMOUNT_WEI")"
-  INIT_CODE="$(cast concat-hex "$CREATION_BYTECODE" "$CONSTRUCTOR_ARGS")"
-
-  BYTECODE_ARG="$(python3 "$SCRIPT_DIR/scripts/deploy_helpers.py" bytes-to-json "$INIT_CODE")"
   GAS_ARG="{\"type\":\"UInt64\",\"value\":\"$DEPLOY_GAS_LIMIT\"}"
-  ARGS_JSON="$(printf '[%s,%s]' "$BYTECODE_ARG" "$GAS_ARG")"
+  ARGS_JSON="$(printf '[%s]' "$GAS_ARG")"
 
-  flow_tx_args_json cadence/transactions/deployment/deploy_lsp_vault_evm.cdc "$ARGS_JSON"
+  flow_tx_args_json \
+  cadence/transactions/deployment/deploy_lsp_vault_evm.cdc \
+  "$ARGS_JSON" \
+  9999
 
-  LSPVAULT_EVM_HEX="$PREDICTED_VAULT_ADDRESS"
+  LSPVAULT_EVM_HEX="$LSPVAULT_EVM_HEX"
   log "Waiting for deployed bytecode to be observable at $LSPVAULT_EVM_HEX"
   for _ in $(seq 1 "$RETRY_ATTEMPTS"); do
     EXISTING_CODE="$(cast code "$LSPVAULT_EVM_HEX" --rpc-url "$EVM_RPC_URL" 2>/dev/null || true)"
@@ -369,7 +374,7 @@ else
     || die "LSPVault deploy transaction sealed but no code observed at $LSPVAULT_EVM_HEX"
 fi
 
-save_state LSPVAULT_EVM_HEX "$LSPVAULT_EVM_HEX"
+# save_state LSPVAULT_EVM_HEX "$LSPVAULT_EVM_HEX"
 log "LSPVault EVM address: $LSPVAULT_EVM_HEX"
 
 # ---------------------------------------------------------------------------
@@ -401,7 +406,7 @@ print(json.dumps([
 ]))
 PYEOF
   )"
-  flow_tx_args_json cadence/transactions/deployment/install_liquid_staking_config.cdc "$ARGS_JSON"
+  flow_tx_args_json cadence/transactions/deployment/install_liquid_staking_config.cdc "$ARGS_JSON" 9999
 fi
 
 # ---------------------------------------------------------------------------
@@ -411,9 +416,39 @@ fi
 # `owner` to the given address; calling it again with the same governance address is a no-op
 # state transition (still costs gas, but never fails or double-applies).
 
-log "Step 8/12: transfer_lsp_vault_ownership_to_governance.cdc"
-flow_tx cadence/transactions/deployment/transfer_lsp_vault_ownership_to_governance.cdc \
-  "$LSPVAULT_EVM_HEX" "$TRANSFER_OWNERSHIP_GAS_LIMIT"
+log "Step 8/12: transfer LSPVault ownership to governance"
+
+CURRENT_OWNER="$(
+  cast call "$LSPVAULT_EVM_HEX" \
+    "owner()(address)" \
+    --rpc-url "$EVM_RPC_URL"
+)"
+
+
+[[ -n "$CURRENT_OWNER" ]] || die "Could not read current LSPVault owner"
+[[ -n "$ROUTER_COA_EVM_HEX" ]] || die "Governance COA address is missing"
+
+CURRENT_OWNER="${CURRENT_OWNER,,}"
+
+if [[ "$CURRENT_OWNER" != "$ROUTER_COA_EVM_HEX" ]]; then
+  log "LSPVault is already owned by governance; skipping transfer"
+else
+  log "Current owner: $CURRENT_OWNER"
+
+  flow_tx cadence/transactions/deployment/transfer_lsp_vault_ownership_to_governance.cdc \
+    "$LSPVAULT_EVM_HEX" "$TRANSFER_OWNERSHIP_GAS_LIMIT"
+
+  CURRENT_OWNER="$(
+    cast call "$LSPVAULT_EVM_HEX" \
+      "owner()(address)" \
+      --rpc-url "$EVM_RPC_URL"
+  )"
+
+  [[ "${CURRENT_OWNER,,}" != "$ROUTER_COA_EVM_HEX" ]] \
+    || die "Ownership transfer did not complete. Current owner: $CURRENT_OWNER"
+fi
+
+log "LSPVault owner: $CURRENT_OWNER"
 
 # ---------------------------------------------------------------------------
 # Step 9: install_liquid_staking.cdc
@@ -429,7 +464,7 @@ else
     "${FLOW_CONFIG_PATHS[-1]}" "$NETWORK" "$PROTOCOL_ADDRESS" \
     cadence/contracts/LiquidStaking.cdc LiquidStakingConfig EVMRoute sFlowToken)"
   ARGS_JSON="$(python3 -c 'import json, sys; print(json.dumps([{"type":"String","value":sys.argv[1]}]))' "$LS_CODE_RESOLVED")"
-  flow_tx_args_json cadence/transactions/deployment/install_liquid_staking.cdc "$ARGS_JSON"
+  flow_tx_args_json cadence/transactions/deployment/install_liquid_staking.cdc "$ARGS_JSON" 9999
 fi
 
 # ---------------------------------------------------------------------------
@@ -485,7 +520,7 @@ print(json.dumps([
 ]))
 PYEOF
 )"
-flow_tx_args_json cadence/transactions/deployment/install_relayer_router.cdc "$ARGS_JSON"
+flow_tx_args_json cadence/transactions/deployment/install_relayer_router.cdc "$ARGS_JSON" 9999
 
 log "Protocol deployment complete."
 log "  Protocol address:    0x$PROTOCOL_ADDRESS"
