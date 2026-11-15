@@ -4,35 +4,35 @@
 			"source": "cadence/contracts/EVMRoute.cdc",
 			"aliases": {
 				"testnet": "8781152e8d454055",
-				"mainnet":"aaa9120d808a6f15"
+				"mainnet":"2f655ad5a8af4c79"
 			}
 		},
 		"LiquidStaking": {
 			"source": "cadence/contracts/LiquidStaking.cdc",
 			"aliases": {
 				"testnet": "8781152e8d454055",
-				"mainnet":"aaa9120d808a6f15"
+				"mainnet":"2f655ad5a8af4c79"
 			}
 		},
 		"LiquidStakingConfig": {
 			"source": "cadence/contracts/LiquidStakingConfig.cdc",
 			"aliases": {
 				"testnet": "8781152e8d454055",
-				"mainnet":"aaa9120d808a6f15"
+				"mainnet":"2f655ad5a8af4c79"
 			}
 		},
 		"RelayerRouter": {
 			"source": "cadence/contracts/RelayerRouter.cdc",
 			"aliases": {
 				"testnet": "8781152e8d454055",
-				"mainnet":"aaa9120d808a6f15"
+				"mainnet":"2f655ad5a8af4c79"
 			}
 		},
 		"sFlowToken": {
 			"source": "cadence/contracts/sFlowToken.cdc",
 			"aliases": {
 				"testnet": "8781152e8d454055",
-				"mainnet":"aaa9120d808a6f15"
+				"mainnet":"2f655ad5a8af4c79"
 			}
 		}
 	},
@@ -344,10 +344,13 @@
 			}
 		},
 		"protocol-mainnet": {
-			"address": "aaa9120d808a6f15",
+			"address": "2f655ad5a8af4c79",
 			"key": {
 				"type": "file",
-				"location": "./protocol-mainnet.pkey"
+				"location": "./protocol-mainnet.pkey",
+				"index": 0,
+				"signatureAlgorithm": "ECDSA_secp256k1",
+				"hashAlgorithm": "SHA2_256"
 			}
 		}
 	},

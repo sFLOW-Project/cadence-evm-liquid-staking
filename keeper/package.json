@@ -12,7 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:migrate:run": "tsx src/db/migrate.ts",
-    "seed:contract": "npx tsx scripts/seed-contract.ts",
+    "seed:contract": "npx tsx src/scripts/seed-contract.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "echo \"Error: no test specified\" && exit 1"

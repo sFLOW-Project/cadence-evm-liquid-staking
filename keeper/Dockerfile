@@ -15,7 +15,7 @@ ENV NODE_ENV=production
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-
+COPY --from=builder /app/src/db/migrations ./src/db/migrations
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/cadence ./src/cadence
 

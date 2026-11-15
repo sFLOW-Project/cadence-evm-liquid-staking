@@ -1,7 +1,7 @@
 import { config } from 'dotenv'
 
-import { createContract, deleteContract } from '../src/db/data/contracts'
-import { getCachedDb } from '../src/db'
+import { createContract, deleteContract } from '../db/data/contracts'
+import { getCachedDb } from '../db'
 
 config()
 
