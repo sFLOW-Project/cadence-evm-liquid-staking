@@ -18,9 +18,11 @@ Subcommands:
       Encodes a hex string as a JSON-Cadence `{"type":"Array","value":[{"type":"UInt8",...}]}`
       payload, for passing large bytecode blobs to `flow transactions send --args-json`.
 """
+import subprocess, sys
 import json
 import re
 import sys
+from pathlib import Path
 
 
 # Flow core-protocol / VM-bridge contracts that are not declared (or not aliased for every
@@ -96,10 +98,63 @@ def cmd_bytes_to_json(args):
     }
     sys.stdout.write(json.dumps(payload))
 
+def cmd_generate_vault_deploy_code(args):
+    sFlowAddress = args[0]
+    routerCOA = args[1]
+    minReq = args[2]
+
+    cwd = Path.cwd()
+
+    # 1. Read creation bytecode directly from Foundry JSON in Python (bypasses shell)
+    artifact = json.loads(Path("evm/out/LSPVault.sol/LSPVault.json").read_text())
+    creation_hex = artifact["bytecode"]["object"].removeprefix("0x")
+
+    # 2. ABI-encode only the 3 small constructor arguments via `cast`
+    res = subprocess.run(
+        [
+            "cast", "abi-encode",
+            "constructor(address,address,uint256)",
+            sFlowAddress, routerCOA, str(minReq)
+        ],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    args_hex = res.stdout.strip().removeprefix("0x")
+
+    # 3. Concatenate hex in memory and format as a Cadence [UInt8] array
+    raw = bytes.fromhex(creation_hex + args_hex)
+    lines = ["["]
+    for i in range(0, len(raw), 32):
+        chunk = raw[i:i+32]
+        ending = "" if i + 32 >= len(raw) else ","
+        lines.append("            " + ", ".join(map(str, chunk)) + ending)
+    lines.append("        ]")
+    formatted_array = "\n".join(lines)
+
+    # 4. Replace the existing `let bytecode : [UInt8] = [ ... ]` block in your .cdc file
+    cdc_path = cwd / "cadence/transactions/deployment/deploy_lsp_vault_evm.cdc"
+    transaction_code = cdc_path.read_text(encoding="utf-8")
+
+    pattern = r"(let\s+bytecode\s*:\s*\[UInt8\]\s*=\s*)\[[\s\S]*?\]"
+    updated_code, count = re.subn(
+        pattern,
+        lambda m: f"{m.group(1)}{formatted_array}",
+        transaction_code,
+        count=1
+    )
+
+    if count == 0:
+        raise ValueError(f"Could not find 'let bytecode : [UInt8] = [...]' in {cdc_path}")
+
+    cdc_path.write_text(updated_code, encoding="utf-8")
+    print(f"Updated {cdc_path} with {len(raw)} bytes.")
+
 
 COMMANDS = {
     "rewrite-imports": cmd_rewrite_imports,
     "bytes-to-json": cmd_bytes_to_json,
+    "generate-bytecode": cmd_generate_vault_deploy_code
 }
 
 

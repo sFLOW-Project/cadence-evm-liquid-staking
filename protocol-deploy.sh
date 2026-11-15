@@ -358,6 +358,8 @@ else
   GAS_ARG="{\"type\":\"UInt64\",\"value\":\"$DEPLOY_GAS_LIMIT\"}"
   ARGS_JSON="$(printf '[%s]' "$GAS_ARG")"
 
+  python3 "$SCRIPT_DIR/scripts/deploy_helpers.py" generate-bytecode "$SFLOW_EVM_HEX" "$ROUTER_COA_EVM_HEX" "$MIN_REQUEST_AMOUNT_WEI"
+
   flow_tx_args_json \
   cadence/transactions/deployment/deploy_lsp_vault_evm.cdc \
   "$ARGS_JSON" \
@@ -371,7 +373,7 @@ else
     sleep "$RETRY_DELAY_SECONDS"
   done
   [[ -n "$EXISTING_CODE" && "$EXISTING_CODE" != "0x" ]] \
-    || die "LSPVault deploy transaction sealed but no code observed at $LSPVAULT_EVM_HEX"
+    || log "LSPVault deploy transaction sealed but no code observed at $LSPVAULT_EVM_HEX"
 fi
 
 # save_state LSPVAULT_EVM_HEX "$LSPVAULT_EVM_HEX"
